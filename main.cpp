@@ -4,6 +4,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <vector>
+#include <algorithm>
 
 typedef uint8_t  u8;
 typedef uint16_t u16;
@@ -279,6 +280,119 @@ Solution greedy_loop(GraphMatrix graph) {
     return result;
 }
 
+Solution regret_loop(GraphMatrix graph) {
+    Solution result;
+    auto& a = result.loop_a;
+    auto& b = result.loop_b;
+
+    s32 max_loop_a_size = graph.dim / 2 + (graph.dim & 1);
+    s32 max_loop_b_size = graph.dim - max_loop_a_size;
+
+    std::vector<s32> available(graph.dim);
+    for (s32 i = 0; i < graph.dim; i++) {
+        available[i] = i;
+    }
+
+    s32 loop_a_first = rand() % graph.dim;
+    s32 first_node_idx = available[loop_a_first];
+    a.push_back(first_node_idx);
+    vector_remove_idx(available, loop_a_first);
+    a.push_back(consume_closest(graph, first_node_idx, available));
+    a.push_back(consume_closest(graph, first_node_idx, available));
+
+    b.push_back(consume_furthest(graph, first_node_idx, available));
+    b.push_back(consume_closest(graph, b[0], available));
+    b.push_back(consume_closest(graph, b[0], available));
+
+    while (available.size() > 0) {
+        s32 best_a = 0;
+        s32 best_a_edge = 0;
+        s32 highest_a_regret = 0;
+
+        for (s32 node_i = 0; node_i < available.size(); node_i++) {
+            s32 a_cost = INT32_MAX;
+            s32 a_edge = 0;
+            s32 node = available[node_i];
+            std::vector<s32> cost_vector;
+
+            for (s32 edge = 0; edge < a.size(); edge++) {
+                s32 node_a = a[edge];
+                s32 node_b = a[(edge+1) % a.size()];
+                s32 cost = graph.cells[node*graph.dim + node_a] + graph.cells[node*graph.dim + node_b]; 
+                cost -= graph.cells[node_a*graph.dim + node_b];
+                cost_vector.push_back(cost);
+
+                if (cost < a_cost) {
+                    a_cost = cost;
+                    a_edge = edge;
+                }
+            }
+
+            if (cost_vector.size() > 1) {
+                std::sort(cost_vector.begin(), cost_vector.end());
+                s32 regret = cost_vector[1]-cost_vector[0];
+                if (regret > highest_a_regret) {
+                    highest_a_regret = regret;
+                    best_a = node_i;
+                    best_a_edge = a_edge;
+                }
+            }
+        }
+
+        s32 best_b = 0;
+        s32 best_b_edge = 0;
+        s32 highest_b_regret = 0;
+
+        for (s32 node_i = 0; node_i < available.size(); node_i++) {
+            s32 b_cost = INT32_MAX;
+            s32 b_edge = 0;
+            s32 node = available[node_i];
+            std::vector<s32> cost_vector;
+
+            for (s32 edge = 0; edge < b.size(); edge++) {
+                s32 node_a = b[edge];
+                s32 node_b = b[(edge+1) % b.size()];
+                s32 cost = graph.cells[node*graph.dim + node_a] + graph.cells[node*graph.dim + node_b]; 
+                cost -= graph.cells[node_a*graph.dim + node_b];
+                cost_vector.push_back(cost);
+
+                if (cost < b_cost) {
+                    b_cost = cost;
+                    b_edge = edge;
+                }
+            }
+
+            if (cost_vector.size() > 1) {
+                std::sort(cost_vector.begin(), cost_vector.end());
+                s32 regret = cost_vector[1]-cost_vector[0];
+                if (regret > highest_b_regret) {
+                    highest_b_regret = regret;
+                    best_b = node_i;
+                    best_b_edge = b_edge;
+                }
+            }
+        }
+
+        bool can_expand_a = a.size() < max_loop_a_size;
+        bool can_expand_b = b.size() < max_loop_b_size;
+        bool should_expand_a = can_expand_a;
+        if (can_expand_a && can_expand_b) {
+            should_expand_a = highest_a_regret >= highest_b_regret;
+        }
+        if (should_expand_a) {
+            s32 node = available[best_a];
+            vector_remove_idx(available, best_a);
+            a.insert(a.begin() + best_a_edge + 1, node);
+        } else {
+            s32 node = available[best_b];
+            vector_remove_idx(available, best_b);
+            b.insert(b.begin() + best_b_edge + 1, node);
+        }
+    }
+
+    return result;
+}
+
 // returns true on success
 bool write_entire_file(const char *filename, void *data, size_t size) {
     FILE *f = fopen(filename, "w");
@@ -315,13 +429,20 @@ int main() {
     auto parsed = parse_file("data/kroB100.tsp");
     auto solution1 = greedy_simple(parsed.graph);
     auto solution2 = greedy_loop(parsed.graph);
+    auto solution3 = regret_loop(parsed.graph);
 
     printf("solution 1 cost = %d\n", score(parsed.graph, solution1));
     printf("solution 2 cost = %d\n", score(parsed.graph, solution2));
+    printf("solution 3 cost = %d\n", score(parsed.graph, solution3));
 
-    write_entire_file("results/a.dat", solution2.loop_a);
-    write_entire_file("results/b.dat", solution2.loop_b);
     write_entire_file("results/pos.dat", parsed.positions);
+
+    write_entire_file("results/1a.dat", solution1.loop_a);
+    write_entire_file("results/1b.dat", solution1.loop_b);
+    write_entire_file("results/2a.dat", solution2.loop_a);
+    write_entire_file("results/2b.dat", solution2.loop_b);
+    write_entire_file("results/3a.dat", solution3.loop_a);
+    write_entire_file("results/3b.dat", solution3.loop_b);
 
     return 0;
 }
