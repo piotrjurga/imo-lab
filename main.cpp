@@ -280,6 +280,13 @@ Solution greedy_loop(GraphMatrix graph) {
     return result;
 }
 
+struct GraphEdgeCost {
+    bool graph = 0; // 0 - a, 1 -b
+    s32 node = 0;
+    s32 edge = 0;
+    s32 cost = INT32_MAX;
+};
+
 Solution regret_loop(GraphMatrix graph) {
     Solution result;
     auto& a = result.loop_a;
@@ -305,88 +312,63 @@ Solution regret_loop(GraphMatrix graph) {
     b.push_back(consume_closest(graph, b[0], available));
 
     while (available.size() > 0) {
-        s32 best_a = 0;
-        s32 best_a_edge = 0;
-        s32 highest_a_regret = 0;
-
-        for (s32 node_i = 0; node_i < available.size(); node_i++) {
-            s32 a_cost = INT32_MAX;
-            s32 a_edge = 0;
-            s32 node = available[node_i];
-            std::vector<s32> cost_vector;
-
-            for (s32 edge = 0; edge < a.size(); edge++) {
-                s32 node_a = a[edge];
-                s32 node_b = a[(edge+1) % a.size()];
-                s32 cost = graph.cells[node*graph.dim + node_a] + graph.cells[node*graph.dim + node_b]; 
-                cost -= graph.cells[node_a*graph.dim + node_b];
-                cost_vector.push_back(cost);
-
-                if (cost < a_cost) {
-                    a_cost = cost;
-                    a_edge = edge;
-                }
-            }
-
-            if (cost_vector.size() > 1) {
-                std::sort(cost_vector.begin(), cost_vector.end());
-                s32 regret = cost_vector[1]-cost_vector[0];
-                if (regret > highest_a_regret) {
-                    highest_a_regret = regret;
-                    best_a = node_i;
-                    best_a_edge = a_edge;
-                }
-            }
-        }
-
-        s32 best_b = 0;
-        s32 best_b_edge = 0;
-        s32 highest_b_regret = 0;
-
-        for (s32 node_i = 0; node_i < available.size(); node_i++) {
-            s32 b_cost = INT32_MAX;
-            s32 b_edge = 0;
-            s32 node = available[node_i];
-            std::vector<s32> cost_vector;
-
-            for (s32 edge = 0; edge < b.size(); edge++) {
-                s32 node_a = b[edge];
-                s32 node_b = b[(edge+1) % b.size()];
-                s32 cost = graph.cells[node*graph.dim + node_a] + graph.cells[node*graph.dim + node_b]; 
-                cost -= graph.cells[node_a*graph.dim + node_b];
-                cost_vector.push_back(cost);
-
-                if (cost < b_cost) {
-                    b_cost = cost;
-                    b_edge = edge;
-                }
-            }
-
-            if (cost_vector.size() > 1) {
-                std::sort(cost_vector.begin(), cost_vector.end());
-                s32 regret = cost_vector[1]-cost_vector[0];
-                if (regret > highest_b_regret) {
-                    highest_b_regret = regret;
-                    best_b = node_i;
-                    best_b_edge = b_edge;
-                }
-            }
-        }
+        GraphEdgeCost highest_regret_insertion;
+        s32 highest_regret = 0;
 
         bool can_expand_a = a.size() < max_loop_a_size;
         bool can_expand_b = b.size() < max_loop_b_size;
-        bool should_expand_a = can_expand_a;
-        if (can_expand_a && can_expand_b) {
-            should_expand_a = highest_a_regret >= highest_b_regret;
+
+        for (s32 node_i = 0; node_i < available.size(); node_i++) {
+            s32 node = available[node_i];
+            GraphEdgeCost best, second_best;
+
+            if (can_expand_a) {
+                for (s32 edge = 0; edge < a.size(); edge++) {
+                    s32 node_a = a[edge];
+                    s32 node_b = a[(edge+1) % a.size()];
+                    s32 cost = graph.cells[node*graph.dim + node_a] + graph.cells[node*graph.dim + node_b]; 
+                    cost -= graph.cells[node_a*graph.dim + node_b];
+
+                    if (cost < best.cost) {
+                        second_best = best;
+                        best.graph = 0;
+                        best.node = node;
+                        best.edge = edge;
+                        best.cost = cost;
+                    }
+                }
+            }
+
+            if (can_expand_b) {
+                for (s32 edge = 0; edge < b.size(); edge++) {
+                    s32 node_a = b[edge];
+                    s32 node_b = b[(edge+1) % b.size()];
+                    s32 cost = graph.cells[node*graph.dim + node_a] + graph.cells[node*graph.dim + node_b]; 
+                    cost -= graph.cells[node_a*graph.dim + node_b];
+
+                    if (cost < best.cost) {
+                        second_best = best;
+                        best.graph = 1;
+                        best.node = node;
+                        best.edge = edge;
+                        best.cost = cost;
+                    }
+                }
+            }
+
+            s32 regret = second_best.cost - best.cost;
+            if (regret >= highest_regret) {
+                highest_regret = regret;
+                highest_regret_insertion = best;
+            }
         }
-        if (should_expand_a) {
-            s32 node = available[best_a];
-            vector_remove_idx(available, best_a);
-            a.insert(a.begin() + best_a_edge + 1, node);
-        } else {
-            s32 node = available[best_b];
-            vector_remove_idx(available, best_b);
-            b.insert(b.begin() + best_b_edge + 1, node);
+
+        vector_remove_idx(available, highest_regret_insertion.node);
+        if (highest_regret_insertion.graph == 0) {
+            a.insert(a.begin() + highest_regret_insertion.edge + 1, highest_regret_insertion.node);
+        }
+        else {
+            b.insert(b.begin() + highest_regret_insertion.edge + 1, highest_regret_insertion.node);
         }
     }
 
@@ -423,26 +405,56 @@ s32 score(GraphMatrix graph, Solution s) {
     return cost;
 }
 
+struct ExperimentResult {
+    Solution best_solution;
+    s32 min, max;
+    f64 average;
+};
+
+ExperimentResult run_experiment(Instance instance, Solution (*solving_method)(GraphMatrix), const char *result_filename) {
+    Solution min_solution, max_solution;
+    ExperimentResult experimentResult = {
+        .min = INT32_MAX,
+        .max = INT32_MIN
+        };
+    s32 n = 100;
+    s32 total_score = 0;
+    for (int i = 0; i < n; i++) {
+        auto solution = solving_method(instance.graph);
+        auto solution_score = score(instance.graph, solution);
+        total_score += solution_score;
+
+        if (solution_score < experimentResult.min) {
+            experimentResult.min = solution_score;
+        }
+        else if (solution_score > experimentResult.max) {
+            experimentResult.max = solution_score;
+            experimentResult.best_solution = solution;
+        }
+    }
+    experimentResult.average = total_score/n;
+
+    char *result_filepath;
+    sprintf(result_filepath, "results/%s-a.dat", result_filename);
+    write_entire_file(result_filepath, experimentResult.best_solution.loop_a);
+    sprintf(result_filepath, "results/%s-b.dat", result_filename);
+    write_entire_file(result_filepath, experimentResult.best_solution.loop_b);
+
+    printf("%s: %f (%d - %d)\n", result_filename, experimentResult.average, experimentResult.min, experimentResult.max);
+
+    return experimentResult;
+}
+
+
 int main() {
     srand(time(0));
 
     auto parsed = parse_file("data/kroB100.tsp");
-    auto solution1 = greedy_simple(parsed.graph);
-    auto solution2 = greedy_loop(parsed.graph);
-    auto solution3 = regret_loop(parsed.graph);
-
-    printf("solution 1 cost = %d\n", score(parsed.graph, solution1));
-    printf("solution 2 cost = %d\n", score(parsed.graph, solution2));
-    printf("solution 3 cost = %d\n", score(parsed.graph, solution3));
-
     write_entire_file("results/pos.dat", parsed.positions);
 
-    write_entire_file("results/1a.dat", solution1.loop_a);
-    write_entire_file("results/1b.dat", solution1.loop_b);
-    write_entire_file("results/2a.dat", solution2.loop_a);
-    write_entire_file("results/2b.dat", solution2.loop_b);
-    write_entire_file("results/3a.dat", solution3.loop_a);
-    write_entire_file("results/3b.dat", solution3.loop_b);
+    auto result1 = run_experiment(parsed, greedy_simple, "greedy_simple");
+    auto result2 = run_experiment(parsed, greedy_loop, "greedy_loop");
+    auto result3 = run_experiment(parsed, regret_loop, "regret_loop");
 
     return 0;
 }

@@ -3,11 +3,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+methods = ["greedy_simple", "greedy_loop", "regret_loop"]
+
 pos = np.fromfile(f'results/pos.dat', dtype=np.int32)
 pos = pos.reshape([-1, 2])
-for i in range(1, 4): 
-    a = np.fromfile(f'results/{i}a.dat', dtype=np.int32)
-    b = np.fromfile(f'results/{i}b.dat', dtype=np.int32)
+for method in methods: 
+    a = np.fromfile(f'results/{method}-a.dat', dtype=np.int32)
+    b = np.fromfile(f'results/{method}-b.dat', dtype=np.int32)
 
     pa = pos[a]
     pb = pos[b]
