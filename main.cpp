@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <vector>
 #include <algorithm>
+#include <set>
+#include <string>
 
 typedef uint8_t  u8;
 typedef uint16_t u16;
@@ -282,7 +284,7 @@ Solution greedy_loop(GraphMatrix graph) {
 
 struct GraphEdgeCost {
     bool graph = 0; // 0 - a, 1 -b
-    s32 node = 0;
+    s32 node_i = 0;
     s32 edge = 0;
     s32 cost = INT32_MAX;
 };
@@ -328,13 +330,19 @@ Solution regret_loop(GraphMatrix graph) {
                     s32 node_b = a[(edge+1) % a.size()];
                     s32 cost = graph.cells[node*graph.dim + node_a] + graph.cells[node*graph.dim + node_b]; 
                     cost -= graph.cells[node_a*graph.dim + node_b];
-
-                    if (cost < best.cost) {
+                    
+                    if (cost <= best.cost) {
                         second_best = best;
                         best.graph = 0;
-                        best.node = node;
+                        best.node_i = node_i;
                         best.edge = edge;
                         best.cost = cost;
+                    }
+                    else if (cost <= second_best.cost) {
+                        second_best.graph = 0;
+                        second_best.node_i = node_i;
+                        second_best.edge = edge;
+                        second_best.cost = cost;
                     }
                 }
             }
@@ -346,16 +354,23 @@ Solution regret_loop(GraphMatrix graph) {
                     s32 cost = graph.cells[node*graph.dim + node_a] + graph.cells[node*graph.dim + node_b]; 
                     cost -= graph.cells[node_a*graph.dim + node_b];
 
-                    if (cost < best.cost) {
+                    if (cost <= best.cost) {
                         second_best = best;
                         best.graph = 1;
-                        best.node = node;
+                        best.node_i = node_i;
                         best.edge = edge;
                         best.cost = cost;
+                    }
+                    else if (cost <= second_best.cost) {
+                        second_best.graph = 0;
+                        second_best.node_i = node_i;
+                        second_best.edge = edge;
+                        second_best.cost = cost;
                     }
                 }
             }
 
+            second_best.cost = second_best.cost == INT32_MAX ? best.cost : second_best.cost;
             s32 regret = second_best.cost - best.cost;
             if (regret >= highest_regret) {
                 highest_regret = regret;
@@ -363,12 +378,13 @@ Solution regret_loop(GraphMatrix graph) {
             }
         }
 
-        vector_remove_idx(available, highest_regret_insertion.node);
+        s32 node = available[highest_regret_insertion.node_i];
+        vector_remove_idx(available, highest_regret_insertion.node_i);
         if (highest_regret_insertion.graph == 0) {
-            a.insert(a.begin() + highest_regret_insertion.edge + 1, highest_regret_insertion.node);
+            a.insert(a.begin() + highest_regret_insertion.edge + 1, node);
         }
         else {
-            b.insert(b.begin() + highest_regret_insertion.edge + 1, highest_regret_insertion.node);
+            b.insert(b.begin() + highest_regret_insertion.edge + 1, node);
         }
     }
 
@@ -405,13 +421,31 @@ s32 score(GraphMatrix graph, Solution s) {
     return cost;
 }
 
+void verifySolution(const char* instance_name, const char* method_name, Instance instance, Solution s) {
+    std::set<s32> a(s.loop_a.begin(), s.loop_a.end());
+    std::set<s32> b(s.loop_b.begin(), s.loop_b.end());
+    
+    std::set<s32> u;
+    std::set_union(a.begin(), a.end(),
+                b.begin(), b.end(),
+                std::inserter(u, u.begin()));
+
+    if (u.size() != instance.graph.dim) {
+        printf("Both loops do not contain all nodes of given instance\n");
+        printf("Loop a size: %zu\n", a.size());
+        printf("Loop b size: %zu\n", b.size());
+        printf("Union of loops size: %zu\n", u.size());
+        printf("Count of nodes that are not in any of the loops: %zu\n", instance.graph.dim-u.size());
+    }
+}
+
 struct ExperimentResult {
     Solution best_solution;
     s32 min, max;
     f64 average;
 };
 
-ExperimentResult run_experiment(Instance instance, Solution (*solving_method)(GraphMatrix), const char *result_filename) {
+ExperimentResult run_experiment(Instance instance, Solution (*solving_method)(GraphMatrix), const char *method_name, const char *instance_name) {
     Solution min_solution, max_solution;
     ExperimentResult experimentResult = {
         .min = INT32_MAX,
@@ -426,21 +460,22 @@ ExperimentResult run_experiment(Instance instance, Solution (*solving_method)(Gr
 
         if (solution_score < experimentResult.min) {
             experimentResult.min = solution_score;
+            experimentResult.best_solution = solution;
         }
         else if (solution_score > experimentResult.max) {
             experimentResult.max = solution_score;
-            experimentResult.best_solution = solution;
         }
     }
-    experimentResult.average = total_score/n;
+    experimentResult.average = total_score/(f64)n;
 
     char *result_filepath;
-    sprintf(result_filepath, "results/%s-a.dat", result_filename);
+    sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
     write_entire_file(result_filepath, experimentResult.best_solution.loop_a);
-    sprintf(result_filepath, "results/%s-b.dat", result_filename);
+    sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
     write_entire_file(result_filepath, experimentResult.best_solution.loop_b);
 
-    printf("%s: %f (%d - %d)\n", result_filename, experimentResult.average, experimentResult.min, experimentResult.max);
+    verifySolution(instance_name, method_name, instance, experimentResult.best_solution);
+    printf("%s %s: %.2f (%d - %d)\n\n", instance_name, method_name, experimentResult.average, experimentResult.min, experimentResult.max);
 
     return experimentResult;
 }
@@ -449,12 +484,19 @@ ExperimentResult run_experiment(Instance instance, Solution (*solving_method)(Gr
 int main() {
     srand(time(0));
 
-    auto parsed = parse_file("data/kroB100.tsp");
-    write_entire_file("results/pos.dat", parsed.positions);
+    auto kroA100 = parse_file("data/kroA100.tsp");
+    write_entire_file("results/kroA100/pos.dat", kroA100.positions);
 
-    auto result1 = run_experiment(parsed, greedy_simple, "greedy_simple");
-    auto result2 = run_experiment(parsed, greedy_loop, "greedy_loop");
-    auto result3 = run_experiment(parsed, regret_loop, "regret_loop");
+    auto result1 = run_experiment(kroA100, greedy_simple, "greedy_simple", "kroA100");
+    auto result2 = run_experiment(kroA100, greedy_loop, "greedy_loop", "kroA100");
+    auto result3 = run_experiment(kroA100, regret_loop, "regret_loop", "kroA100");
+
+    auto kroB100 = parse_file("data/kroB100.tsp");
+    write_entire_file("results/kroB100/pos.dat", kroB100.positions);
+
+    auto result4 = run_experiment(kroB100, greedy_simple, "greedy_simple", "kroB100");
+    auto result5 = run_experiment(kroB100, greedy_loop, "greedy_loop", "kroB100");
+    auto result6 = run_experiment(kroB100, regret_loop, "regret_loop", "kroB100");
 
     return 0;
 }
