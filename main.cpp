@@ -282,8 +282,8 @@ Solution greedy_loop(GraphMatrix graph) {
     return result;
 }
 
-struct GraphEdgeCost {
-    bool graph = 0; // 0 - a, 1 -b
+struct CycleEdgeCost {
+    bool cycle = 0; // 0 - a, 1 -b
     s32 node_i = 0;
     s32 edge = 0;
     s32 cost = INT32_MAX;
@@ -314,7 +314,7 @@ Solution regret_loop(GraphMatrix graph) {
     b.push_back(consume_closest(graph, b[0], available));
 
     while (available.size() > 0) {
-        GraphEdgeCost highest_regret_insertion;
+        CycleEdgeCost highest_regret_insertion;
         s32 highest_regret = 0;
 
         bool can_expand_a = a.size() < max_loop_a_size;
@@ -322,7 +322,7 @@ Solution regret_loop(GraphMatrix graph) {
 
         for (s32 node_i = 0; node_i < available.size(); node_i++) {
             s32 node = available[node_i];
-            GraphEdgeCost best, second_best;
+            CycleEdgeCost best, second_best;
 
             if (can_expand_a) {
                 for (s32 edge = 0; edge < a.size(); edge++) {
@@ -333,13 +333,13 @@ Solution regret_loop(GraphMatrix graph) {
                     
                     if (cost <= best.cost) {
                         second_best = best;
-                        best.graph = 0;
+                        best.cycle = 0;
                         best.node_i = node_i;
                         best.edge = edge;
                         best.cost = cost;
                     }
                     else if (cost <= second_best.cost) {
-                        second_best.graph = 0;
+                        second_best.cycle = 0;
                         second_best.node_i = node_i;
                         second_best.edge = edge;
                         second_best.cost = cost;
@@ -356,13 +356,13 @@ Solution regret_loop(GraphMatrix graph) {
 
                     if (cost <= best.cost) {
                         second_best = best;
-                        best.graph = 1;
+                        best.cycle = 1;
                         best.node_i = node_i;
                         best.edge = edge;
                         best.cost = cost;
                     }
                     else if (cost <= second_best.cost) {
-                        second_best.graph = 0;
+                        second_best.cycle = 0;
                         second_best.node_i = node_i;
                         second_best.edge = edge;
                         second_best.cost = cost;
@@ -380,7 +380,7 @@ Solution regret_loop(GraphMatrix graph) {
 
         s32 node = available[highest_regret_insertion.node_i];
         vector_remove_idx(available, highest_regret_insertion.node_i);
-        if (highest_regret_insertion.graph == 0) {
+        if (highest_regret_insertion.cycle == 0) {
             a.insert(a.begin() + highest_regret_insertion.edge + 1, node);
         }
         else {
