@@ -5,8 +5,10 @@
 #include <stdlib.h>
 #include <vector>
 #include <algorithm>
+#include <iterator>
 #include <set>
 #include <string>
+#include <assert.h>
 
 typedef uint8_t  u8;
 typedef uint16_t u16;
@@ -23,6 +25,9 @@ typedef double f64;
 struct GraphMatrix {
     s32 *cells;
     s32 dim;
+    inline s32 get(s32 i, s32 j) {
+        return cells[i*dim + j];
+    };
 };
 
 void skip_lines(FILE *f, s32 count) {
@@ -168,8 +173,8 @@ Solution greedy_simple(GraphMatrix graph) {
         s32 candidate_a = closest_node(graph, last_a, available);
         s32 candidate_b = closest_node(graph, last_b, available);
 
-        s32 cost_a = graph.cells[last_a*graph.dim + available[candidate_a]];
-        s32 cost_b = graph.cells[last_b*graph.dim + available[candidate_b]];
+        s32 cost_a = graph.get(last_a, available[candidate_a]);
+        s32 cost_b = graph.get(last_b, available[candidate_b]);
 
         bool can_expand_a = a.size() < max_loop_a_size;
         bool can_expand_b = b.size() < max_loop_b_size;
@@ -195,8 +200,7 @@ s32 best_intermediate_node(GraphMatrix graph, s32 a, s32 b, std::vector<s32>& av
     s32 best_cost = INT32_MAX;
     for (s32 i = 0; i < available.size(); i++) {
         s32 idx = available[i];
-        s32 cost = graph.cells[idx*graph.dim + a] + graph.cells[idx*graph.dim + b];
-        cost -= graph.cells[a*graph.dim + b];
+        s32 cost = graph.get(idx, a) + graph.get(idx, b) - graph.get(a, b);
         if (cost < best_cost) {
             best = i;
             best_cost = cost;
@@ -236,8 +240,7 @@ Solution greedy_loop(GraphMatrix graph) {
             s32 node_b = a[(edge+1) % a.size()];
             s32 node_i = best_intermediate_node(graph, node_a, node_b, available);
             s32 node = available[node_i];
-            s32 cost = graph.cells[node*graph.dim + node_a] + graph.cells[node*graph.dim + node_b];
-            cost -= graph.cells[node_a*graph.dim + node_b];
+            s32 cost = graph.get(node, node_a) + graph.get(node, node_b) - graph.get(node_a, node_b);
             if (cost < best_a_cost) {
                 best_a = node_i;
                 best_a_cost = cost;
@@ -253,8 +256,7 @@ Solution greedy_loop(GraphMatrix graph) {
             s32 node_b = b[(edge+1) % b.size()];
             s32 node_i = best_intermediate_node(graph, node_a, node_b, available);
             s32 node = available[node_i];
-            s32 cost = graph.cells[node*graph.dim + node_a] + graph.cells[node*graph.dim + node_b];
-            cost -= graph.cells[node_a*graph.dim + node_b];
+            s32 cost = graph.get(node, node_a) + graph.get(node, node_b) - graph.get(node_a, node_b);
             if (cost < best_b_cost) {
                 best_b = node_i;
                 best_b_cost = cost;
@@ -328,8 +330,7 @@ Solution regret_loop(GraphMatrix graph) {
                 for (s32 edge = 0; edge < a.size(); edge++) {
                     s32 node_a = a[edge];
                     s32 node_b = a[(edge+1) % a.size()];
-                    s32 cost = graph.cells[node*graph.dim + node_a] + graph.cells[node*graph.dim + node_b]; 
-                    cost -= graph.cells[node_a*graph.dim + node_b];
+                    s32 cost = graph.get(node, node_a) + graph.get(node, node_b) - graph.get(node_a, node_b);
                     
                     if (cost <= best.cost) {
                         second_best = best;
@@ -351,8 +352,7 @@ Solution regret_loop(GraphMatrix graph) {
                 for (s32 edge = 0; edge < b.size(); edge++) {
                     s32 node_a = b[edge];
                     s32 node_b = b[(edge+1) % b.size()];
-                    s32 cost = graph.cells[node*graph.dim + node_a] + graph.cells[node*graph.dim + node_b]; 
-                    cost -= graph.cells[node_a*graph.dim + node_b];
+                    s32 cost = graph.get(node, node_a) + graph.get(node, node_b) - graph.get(node_a, node_b);
 
                     if (cost <= best.cost) {
                         second_best = best;
@@ -393,7 +393,7 @@ Solution regret_loop(GraphMatrix graph) {
 
 // returns true on success
 bool write_entire_file(const char *filename, void *data, size_t size) {
-    FILE *f = fopen(filename, "w");
+    FILE *f = fopen(filename, "wb");
     if (!f) return false;
     size_t written = fwrite(data, size, 1, f);
     fclose(f);
@@ -411,17 +411,17 @@ s32 score(GraphMatrix graph, Solution s) {
     for (s32 i = 0; i < s.loop_a.size(); i++) {
         s32 a = s.loop_a[i];
         s32 b = s.loop_a[(i+1) % s.loop_a.size()];
-        cost += graph.cells[a*graph.dim + b];
+        cost += graph.get(a, b);
     }
     for (s32 i = 0; i < s.loop_b.size(); i++) {
         s32 a = s.loop_b[i];
         s32 b = s.loop_b[(i+1) % s.loop_b.size()];
-        cost += graph.cells[a*graph.dim + b];
+        cost += graph.get(a, b);
     }
     return cost;
 }
 
-void verifySolution(const char* instance_name, const char* method_name, Instance instance, Solution s) {
+void verify_solution(const char* instance_name, const char* method_name, Instance instance, Solution s) {
     std::set<s32> a(s.loop_a.begin(), s.loop_a.end());
     std::set<s32> b(s.loop_b.begin(), s.loop_b.end());
     
@@ -449,7 +449,7 @@ struct ExperimentResult {
 
 ExperimentResult run_experiment(Instance instance, Solver solving_method, const char *method_name, const char *instance_name) {
     Solution min_solution, max_solution;
-    ExperimentResult experimentResult = {
+    ExperimentResult experiment_result = {
         .min = INT32_MAX,
         .max = INT32_MIN
         };
@@ -460,26 +460,26 @@ ExperimentResult run_experiment(Instance instance, Solver solving_method, const 
         auto solution_score = score(instance.graph, solution);
         total_score += solution_score;
 
-        if (solution_score < experimentResult.min) {
-            experimentResult.min = solution_score;
-            experimentResult.best_solution = solution;
+        if (solution_score < experiment_result.min) {
+            experiment_result.min = solution_score;
+            experiment_result.best_solution = solution;
         }
-        else if (solution_score > experimentResult.max) {
-            experimentResult.max = solution_score;
+        else if (solution_score > experiment_result.max) {
+            experiment_result.max = solution_score;
         }
     }
-    experimentResult.average = total_score/(f64)n;
+    experiment_result.average = total_score/(f64)n;
 
-    char *result_filepath;
+    char result_filepath[128];
     sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
-    write_entire_file(result_filepath, experimentResult.best_solution.loop_a);
+    write_entire_file(result_filepath, experiment_result.best_solution.loop_a);
     sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
-    write_entire_file(result_filepath, experimentResult.best_solution.loop_b);
+    write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
 
-    verifySolution(instance_name, method_name, instance, experimentResult.best_solution);
-    printf("%s %s: %.2f (%d - %d)\n\n", instance_name, method_name, experimentResult.average, experimentResult.min, experimentResult.max);
+    verify_solution(instance_name, method_name, instance, experiment_result.best_solution);
+    printf("%s %s: %.2f (%d - %d)\n\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max);
 
-    return experimentResult;
+    return experiment_result;
 }
 
 void greedy_experiments() {
@@ -498,174 +498,320 @@ void greedy_experiments() {
     auto result6 = run_experiment(kroB100, regret_loop, "regret_loop", "kroB100");
 }
 
-Solution neighbour_search_node(GraphMatrix graph, Solution init, bool greedy) {
-    std::vector<s32> *best_loop = NULL;
-    s32 node_i = 0, node_j = 0;
-    s32 best_delta = 0;
+struct NodeExchange {
+    s32 delta, i, j;
+};
 
-    Solution sol = init;
+NodeExchange best_node_exchange(GraphMatrix graph, std::vector<s32>& loop_i, std::vector<s32>& loop_j, bool greedy) {
+    NodeExchange result = {};
+    s32 loop_i_count = loop_i.size();
+    s32 loop_j_count = loop_j.size();
+    s32 offset_i = rand() % loop_i_count;
+    s32 offset_j = rand() % loop_j_count;
+    for (s32 i = 0; i < loop_i.size(); i++) {
+        s32 i_prev = loop_i[(i-1+loop_i_count+offset_i) % loop_i_count];
+        s32 i_curr = loop_i[(i+offset_i) % loop_i_count];
+        s32 i_next = loop_i[(i+1+offset_i) % loop_i_count];
+        s32 i_cost = graph.get(i_curr, i_prev) + graph.get(i_curr, i_next);
+        for (s32 j = 0; j < loop_j.size(); j++) {
+            s32 j_prev = loop_j[(j-1+loop_j_count+offset_j) % loop_j_count];
+            s32 j_curr = loop_j[(j+offset_j) % loop_j_count];
+            s32 j_next = loop_j[(j+1+offset_j) % loop_j_count];
+            s32 j_cost = graph.get(j_curr, j_prev) + graph.get(j_curr, j_next);
+            s32 new_i_cost = graph.get(j_curr, i_prev) + graph.get(j_curr, i_next);
+            s32 new_j_cost = graph.get(i_curr, j_prev) + graph.get(i_curr, j_next);
+            s32 delta = new_i_cost + new_j_cost - i_cost - j_cost;
+            if (delta < result.delta) {
+                result.delta = delta;
+                result.i = (i+offset_i) % loop_i_count;
+                result.j = (j+offset_j) % loop_j_count;
+                if (greedy) return result;
+            }
+        }
+    }
+
+    return result;
+}
+
+NodeExchange best_node_exchange(GraphMatrix graph, std::vector<s32>& loop, bool greedy) {
+    NodeExchange result = {};
+    s32 loop_count = loop.size();
+    s32 offset = rand() % loop_count;
+    for (s32 i = 0; i < loop_count; i++) {
+        s32 i_prev = loop[(i-1+loop_count+offset) % loop_count];
+        s32 i_curr = loop[(i+offset) % loop_count];
+        s32 i_next = loop[(i+1+offset) % loop_count];
+        s32 i_cost = graph.get(i_curr, i_prev) + graph.get(i_curr, i_next);
+
+        for (s32 j = i+2; j < loop_count; j++) {
+            s32 j_prev = loop[(j-1+offset) % loop_count];
+            s32 j_curr = loop[(j+offset) % loop_count];
+            s32 j_next = loop[(j+1+offset) % loop_count];
+            s32 j_cost = graph.get(j_curr, j_prev) + graph.get(j_curr, j_next);
+            s32 new_i_cost = graph.get(j_curr, i_prev) + graph.get(j_curr, i_next);
+            s32 new_j_cost = graph.get(i_curr, j_prev) + graph.get(i_curr, j_next);
+            s32 delta = new_i_cost + new_j_cost - i_cost - j_cost;
+            if (j_curr == i_next) {
+                s32 old_cost = graph.get(i_curr, i_prev) + graph.get(j_curr, j_next);
+                s32 new_cost = graph.get(j_curr, i_prev) + graph.get(i_curr, j_next);
+                delta = new_cost - old_cost;
+            } else if (i_curr == j_next) {
+                s32 old_cost = graph.get(j_curr, j_prev) + graph.get(i_curr, i_next);
+                s32 new_cost = graph.get(i_curr, j_prev) + graph.get(j_curr, i_next);
+                delta = new_cost - old_cost;
+            }
+            if (delta < result.delta) {
+                result.delta = delta;
+                result.i = (i+offset) % loop_count;
+                result.j = (j+offset) % loop_count;
+                if (greedy) return result;
+            }
+        }
+    }
+    return result;
+}
+
+Solution neighbour_search_node(GraphMatrix graph, Solution init, bool greedy) {
+    Solution result = init;
 
     std::vector<s32> *loops[2];
-    loops[0] = &sol.loop_a;
-    loops[1] = &sol.loop_b;
+    loops[0] = &result.loop_a;
+    loops[1] = &result.loop_b;
 
     while (true) {
-        best_delta = 0;
+        NodeExchange best = {};
+        std::vector<s32> *best_loop = NULL;
 
-        for (s32 loop_i = 0; loop_i < 2; loop_i++) {
-            auto& loop = *loops[loop_i];
-            s32 loop_count = loop.size();
-            for (s32 i = 0; i < loop_count; i++) {
-                s32 i_prev = loop[(i-1+loop_count) % loop_count];
-                s32 i_curr = loop[i];
-                s32 i_next = loop[(i+1) % loop_count];
-                s32 i_cost = graph.cells[i_curr*graph.dim + i_prev] +
-                             graph.cells[i_curr*graph.dim + i_next];
-                for (s32 j = i+2; j < loop_count; j++) {
-                    s32 j_prev = loop[j-1];
-                    s32 j_curr = loop[j];
-                    s32 j_next = loop[(j+1) % loop_count];
-                    s32 j_cost = graph.cells[j_curr*graph.dim + j_prev] +
-                                 graph.cells[j_curr*graph.dim + j_next];
-                    s32 new_i_cost = graph.cells[j_curr*graph.dim + i_prev] +
-                                     graph.cells[j_curr*graph.dim + i_next];
-                    s32 new_j_cost = graph.cells[i_curr*graph.dim + j_prev] +
-                                     graph.cells[i_curr*graph.dim + j_next];
-                    s32 delta = new_i_cost + new_j_cost - i_cost - j_cost;
-                    //if (j_curr == i_next || i_curr == j_next) continue;
-                    if (j_curr == i_next) {
-                        s32 old_cost = graph.cells[i_curr*graph.dim + i_prev] +
-                                       graph.cells[j_curr*graph.dim + j_next];
-                        s32 new_cost = graph.cells[j_curr*graph.dim + i_prev] +
-                                       graph.cells[i_curr*graph.dim + j_next];
-                        delta = new_cost - old_cost;
-                    } else if (i_curr == j_next) {
-                        s32 old_cost = graph.cells[j_curr*graph.dim + j_prev] +
-                                       graph.cells[i_curr*graph.dim + i_next];
-                        s32 new_cost = graph.cells[i_curr*graph.dim + j_prev] +
-                                       graph.cells[j_curr*graph.dim + i_next];
-                        delta = new_cost - old_cost;
-                    }
-                    if (delta < best_delta) {
-                        best_delta = delta;
-                        node_i = i;
-                        node_j = j;
-                        best_loop = &loop;
-                        if (greedy) {
-                            goto apply_found_move;
-                        }
-                    }
-                }
+        s32 loop_offset = rand() & 1;
+        for (s32 loop_idx = 0; loop_idx < 2; loop_idx++) {
+            auto& loop = *loops[(loop_idx+loop_offset) & 1];
+            auto change = best_node_exchange(graph, loop, greedy);
+            if (change.delta < best.delta) {
+                best = change;
+                best_loop = &loop;
+                if (greedy) goto apply_change;
             }
         }
 
-apply_found_move:
-        if (best_delta < 0) {
-            auto& loop = *best_loop;
-#if 0
-            printf("delta: %d\n", best_delta);
-            printf("switch nodes: (%d, %d)\n", node_i, node_j);
-            if (node_i == 29 && node_j == 30) {
-                s32 i_prev = loop[(node_i-1+loop.size()) % loop.size()];
-                s32 i_curr = loop[node_i];
-                s32 i_next = loop[(node_i+1) % loop.size()];
+        auto change = best_node_exchange(graph, result.loop_a, result.loop_b, greedy);
+        if (change.delta < best.delta) {
+            best = change;
+            best_loop = NULL;
+        }
 
-                s32 j_prev = loop[node_j-1];
-                s32 j_curr = loop[node_j];
-                s32 j_next = loop[(node_j+1) % loop.size()];
-
-                printf("i-1 ->  i  = %d\n", graph.cells[i_prev*graph.dim + i_curr]);
-                printf("i-1 ->  j  = %d\n", graph.cells[i_prev*graph.dim + j_curr]);
-                printf("j-1 ->  i  = %d\n", graph.cells[j_prev*graph.dim + i_curr]);
-                printf("j-1 ->  j  = %d\n", graph.cells[j_prev*graph.dim + j_curr]);
-                printf(" i  -> i+1 = %d\n", graph.cells[i_curr*graph.dim + i_next]);
-                printf(" i  -> j+1 = %d\n", graph.cells[i_curr*graph.dim + j_next]);
-                printf(" j  -> i+1 = %d\n", graph.cells[j_curr*graph.dim + i_next]);
-                printf(" j  -> j+1 = %d\n", graph.cells[j_curr*graph.dim + j_next]);
+apply_change:
+        if (best.delta < 0) {
+            if (best_loop) {
+                auto& loop = *best_loop;
+                s32 t = loop[best.i];
+                loop[best.i] = loop[best.j];
+                loop[best.j] = t;
+            } else {
+                s32 t = result.loop_a[best.i];
+                result.loop_a[best.i] = result.loop_b[best.j];
+                result.loop_b[best.j] = t;
             }
-#endif
-            s32 t = loop[node_i];
-            loop[node_i] = loop[node_j];
-            loop[node_j] = t;
         } else {
             break;
         }
     }
-    return sol;
+    return result;
 }
 
 Solution neighbour_search_edge(GraphMatrix graph, Solution init, bool greedy) {
-    std::vector<s32> *best_loop = NULL;
-    s32 edge_i = 0, edge_j = 0;
-    s32 best_delta = 0;
-
-    Solution sol = init;
+    Solution result = init;
 
     std::vector<s32> *loops[2];
-    loops[0] = &sol.loop_a;
-    loops[1] = &sol.loop_b;
+    loops[0] = &result.loop_a;
+    loops[1] = &result.loop_b;
 
     while (true) {
-        best_delta = 0;
+        NodeExchange best = {};
+        std::vector<s32> *best_loop = NULL;
 
+        s32 loop_offset = rand() & 1;
         for (s32 loop_i = 0; loop_i < 2; loop_i++) {
-            auto& loop = *loops[loop_i];
+            auto& loop = *loops[(loop_i + loop_offset) & 1];
             s32 loop_count = loop.size();
+            s32 offset = rand() % loop_count;
             for (s32 i = 0; i < loop_count; i++) {
-                s32 i_from = loop[i];
-                s32 i_to = loop[(i+1) % loop_count];
-                s32 i_cost = graph.cells[i_from*graph.dim + i_to];
+                s32 i_from = loop[(i+offset) % loop_count];
+                s32 i_to = loop[(i+1+offset) % loop_count];
+                s32 i_cost = graph.get(i_from, i_to);
                 for (s32 j = i+1; j < loop_count; j++) {
-                    s32 j_from = loop[j];
-                    s32 j_to = loop[(j+1) % loop_count];
-                    s32 j_cost = graph.cells[j_from*graph.dim + j_to];
+                    s32 j_from = loop[(j+offset) % loop_count];
+                    s32 j_to = loop[(j+1+offset) % loop_count];
+                    s32 j_cost = graph.get(j_from, j_to);
 
-                    s32 new_i_cost = graph.cells[j_from*graph.dim + i_from];
-                    s32 new_j_cost = graph.cells[j_to*graph.dim + i_to];
+                    s32 new_i_cost = graph.get(j_from, i_from);
+                    s32 new_j_cost = graph.get(j_to, i_to);
                     s32 delta = new_i_cost + new_j_cost - i_cost - j_cost;
-                    if (delta < best_delta) {
-                        best_delta = delta;
-                        edge_i = i;
-                        edge_j = j;
+                    if (delta < best.delta) {
+                        best.delta = delta;
+                        best.i = (i+offset) % loop_count;
+                        best.j = (j+offset) % loop_count;
                         best_loop = &loop;
-                        if (greedy) {
-                            goto apply_found_move;
-                        }
+                        if (greedy) goto apply_change;
                     }
                 }
             }
         }
 
-apply_found_move:
-        if (best_delta < 0) {
-            auto& loop = *best_loop;
-            s32 between = (edge_i+1 + edge_j) / 2;
-            for (s32 i = edge_i+1; i <= between; i++) {
-                s32 j = edge_j + edge_i+1 - i;
-                s32 t = loop[i];
-                loop[i] = loop[j];
-                loop[j] = t;
+        auto best_cross_loop = best_node_exchange(graph, result.loop_a, result.loop_b, greedy);
+        if (best_cross_loop.delta < best.delta) {
+            best = best_cross_loop;
+            best_loop = NULL;
+        }
+
+apply_change:
+        if (best.delta < 0) {
+            if (best_loop) {
+                s32 edge_i = (best.i < best.j) ? best.i : best.j;
+                s32 edge_j = (best.i > best.j) ? best.i : best.j;
+                auto& loop = *best_loop;
+                s32 between = (edge_i+1 + edge_j) / 2;
+                for (s32 i = edge_i+1; i <= between; i++) {
+                    s32 j = edge_j + edge_i+1 - i;
+                    s32 t = loop[i];
+                    loop[i] = loop[j];
+                    loop[j] = t;
+                }
+            } else {
+                s32 t = result.loop_a[best.i];
+                result.loop_a[best.i] = result.loop_b[best.j];
+                result.loop_b[best.j] = t;
             }
         } else {
             break;
         }
     }
-    return sol;
+    return result;
 }
 
+void shuffle(std::vector<s32>& v) {
+    for (s32 i = 0; i < v.size(); i++) {
+        s32 j = i + rand() % (v.size() - i);
+        s32 t = v[i];
+        v[i] = v[j];
+        v[j] = t;
+    }
+}
+
+Solution random_solution(s32 node_count) {
+    std::vector<s32> nodes(node_count);
+    for (s32 i = 0; i < node_count; i++) {
+        nodes[i] = i;
+    }
+    shuffle(nodes);
+    Solution result;
+    result.loop_a = std::vector<s32>(node_count / 2 + (node_count&1));
+    result.loop_b = std::vector<s32>(node_count / 2);
+    for (s32 i = 0; i < result.loop_a.size(); i++) {
+        result.loop_a[i] = nodes[i];
+    }
+    s32 base = result.loop_a.size();
+    for (s32 i = 0; i < result.loop_b.size(); i++) {
+        result.loop_b[i] = nodes[base + i];
+    }
+    return result;
+}
+
+Solution random_walk(Solution init, s32 steps) {
+    auto result = init;
+
+    std::vector<s32> *loops[2];
+    loops[0] = &result.loop_a;
+    loops[1] = &result.loop_b;
+
+    for (s32 i = 0; i < steps; i++) {
+        s32 move_type = rand() % 3;
+        switch(move_type) {
+            case 0: {
+                // switch two edges from a random loop
+                auto& loop = *loops[rand()&1];
+                s32 edge_i = rand() % loop.size();
+                s32 edge_j = rand() % loop.size();
+                while (abs(edge_i - edge_j) < 3)
+                    edge_j = rand() % loop.size();
+                if (edge_i > edge_j) {
+                    s32 t = edge_i;
+                    edge_i = edge_j;
+                    edge_j = t;
+                }
+                s32 between = (edge_i+1 + edge_j) / 2;
+                for (s32 i = edge_i+1; i <= between; i++) {
+                    s32 j = edge_j + edge_i+1 - i;
+                    s32 t = loop[i];
+                    loop[i] = loop[j];
+                    loop[j] = t;
+                }
+            } break;
+            case 1: {
+                // switch two nodes from a random loop
+                auto& loop = *loops[rand()&1];
+                s32 node_i = rand() % loop.size();
+                s32 node_j = rand() % loop.size();
+                while (node_i == node_j)
+                    node_j = rand() % loop.size();
+                s32 t = loop[node_i];
+                loop[node_i] = loop[node_j];
+                loop[node_j] = t;
+            } break;
+            case 2: {
+                // switch two nodes from different loops
+                s32 node_i = rand() % result.loop_a.size();
+                s32 node_j = rand() % result.loop_b.size();
+                s32 t = result.loop_a[node_i];
+                result.loop_a[node_i] = result.loop_b[node_j];
+                result.loop_b[node_j] = t;
+            } break;
+        }
+    }
+    return result;
+}
 
 int main() {
     srand(time(0));
+    //srand(7);
 
     auto kroA100 = parse_file("data/kroA100.tsp");
-    write_entire_file("results/kroA100/pos.dat", kroA100.positions);
+    assert(write_entire_file("results/pos.dat", kroA100.positions));
 
     auto s1 = greedy_loop(kroA100.graph);
-    auto s2 = neighbour_search_edge(kroA100.graph, s1, false);
-    auto s3 = neighbour_search_node(kroA100.graph, s1, false);
     printf("greedy score: %d\n", score(kroA100.graph, s1));
-    printf("edge search score: %d\n", score(kroA100.graph, s2));
-    printf("node search score: %d\n", score(kroA100.graph, s3));
+
+    auto s2 = neighbour_search_edge(kroA100.graph, s1, false);
+    printf("edge search steepest: %d\n", score(kroA100.graph, s2));
+
+    auto s3 = neighbour_search_edge(kroA100.graph, s1, true);
+    printf("edge search greedy:   %d\n", score(kroA100.graph, s3));
+
+    auto s4 = neighbour_search_node(kroA100.graph, s1, false);
+    printf("node search steepest: %d\n", score(kroA100.graph, s4));
+
+    auto s5 = neighbour_search_node(kroA100.graph, s1, true);
+    printf("node search greedy:   %d\n", score(kroA100.graph, s5));
+
+    auto r1 = random_solution(kroA100.graph.dim);
+    printf("random score: %d\n", score(kroA100.graph, r1));
+
+    auto r2 = neighbour_search_edge(kroA100.graph, r1, false);
+    printf("edge search steepest: %d\n", score(kroA100.graph, r2));
+
+    auto r3 = neighbour_search_edge(kroA100.graph, r1, true);
+    printf("edge search greedy:   %d\n", score(kroA100.graph, r3));
+
+    auto r4 = neighbour_search_node(kroA100.graph, r1, false);
+    printf("node search steepest: %d\n", score(kroA100.graph, r4));
+
+    auto r5 = neighbour_search_node(kroA100.graph, r1, true);
+    printf("node search greedy:   %d\n", score(kroA100.graph, r5));
+
+    auto s6 = random_walk(s1, 10);
+    printf("random walk:   %d\n", score(kroA100.graph, s6));
+
+    write_entire_file("results/a.dat", s2.loop_a);
+    write_entire_file("results/b.dat", s2.loop_b);
 
     return 0;
 }
