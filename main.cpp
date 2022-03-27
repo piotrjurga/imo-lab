@@ -770,48 +770,154 @@ Solution random_walk(Solution init, s32 steps) {
     return result;
 }
 
-int main() {
-    srand(time(0));
-    //srand(7);
+typedef Solution (*LS_Solver)(GraphMatrix graph, Solution init, bool greedy);
 
+ExperimentResult run_experiment_2(Instance instance, Solution initial_solution, LS_Solver local_search_method, const char *method_name, const char *instance_name, bool greedy) {
+    Solution min_solution, max_solution;
+    ExperimentResult experiment_result = {
+        .min = INT32_MAX,
+        .max = INT32_MIN
+        };
+    s32 n = 100;
+    s32 total_score = 0;
+    for (int i = 0; i < n; i++) {
+        auto solution =  local_search_method(instance.graph, initial_solution, greedy);
+        auto solution_score = score(instance.graph, solution);
+        total_score += solution_score;
+
+        if (solution_score < experiment_result.min) {
+            experiment_result.min = solution_score;
+            experiment_result.best_solution = solution;
+        }
+        else if (solution_score > experiment_result.max) {
+            experiment_result.max = solution_score;
+        }
+    }
+    experiment_result.average = total_score/(f64)n;
+
+    char result_filepath[128];
+    sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
+    write_entire_file(result_filepath, experiment_result.best_solution.loop_a);
+    sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
+    write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
+
+    verify_solution(instance_name, method_name, instance, experiment_result.best_solution);
+    printf("%s %s: %.2f (%d - %d)\n\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max);
+
+    return experiment_result;
+}
+
+ExperimentResult run_random_walk_experiment_2(Instance instance, Solution initial_solution, const char *method_name, const char *instance_name, s32 steps) {
+    Solution min_solution, max_solution;
+    ExperimentResult experiment_result = {
+        .min = INT32_MAX,
+        .max = INT32_MIN
+        };
+    s32 n = 100;
+    s32 total_score = 0;
+    for (int i = 0; i < n; i++) {
+        auto solution =  random_walk(initial_solution, steps);
+        auto solution_score = score(instance.graph, solution);
+        total_score += solution_score;
+
+        if (solution_score < experiment_result.min) {
+            experiment_result.min = solution_score;
+            experiment_result.best_solution = solution;
+        }
+        else if (solution_score > experiment_result.max) {
+            experiment_result.max = solution_score;
+        }
+    }
+    experiment_result.average = total_score/(f64)n;
+
+    char result_filepath[128];
+    sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
+    write_entire_file(result_filepath, experiment_result.best_solution.loop_a);
+    sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
+    write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
+
+    verify_solution(instance_name, method_name, instance, experiment_result.best_solution);
+    printf("%s %s: %.2f (%d - %d)\n\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max);
+
+    return experiment_result;
+}
+
+void run_experiment_2_for_instance(Instance instance, const char *instance_name) {
+    auto random_sol = random_solution(instance.graph.dim);
+    auto greedy_loop_sol = greedy_loop(instance.graph);
+
+    // losowe rozwiązanie
+    run_random_walk_experiment_2(instance, random_sol, "random-random_walk", instance_name, 10000);
+    run_experiment_2(instance, random_sol, neighbour_search_node, "random-greedy-neighbour_search_node", instance_name, true);
+    run_experiment_2(instance, random_sol, neighbour_search_edge, "random-greedy-neighbour_search_edge", instance_name, true);
+    run_experiment_2(instance, random_sol, neighbour_search_node, "random-neighbour_search_edge", instance_name, false);
+    run_experiment_2(instance, random_sol, neighbour_search_edge, "random-neighbour_search_edge", instance_name, false);
+
+    // rozbudowa cyklu
+    run_random_walk_experiment_2(instance, greedy_loop_sol, "random-random_walk", instance_name, 10000);
+    run_experiment_2(instance, greedy_loop_sol, neighbour_search_node, "greedy_loop-greedy-neighbour_search_node", instance_name, true);
+    run_experiment_2(instance, greedy_loop_sol, neighbour_search_edge, "greedy_loop-greedy-neighbour_search_edge", instance_name, true);
+    run_experiment_2(instance, greedy_loop_sol, neighbour_search_node, "greedy_loop-neighbour_search_edge", instance_name, false);
+    run_experiment_2(instance, greedy_loop_sol, neighbour_search_edge, "greedy_loop-neighbour_search_edge", instance_name, false);
+}
+
+void local_search_experiments() {
     auto kroA100 = parse_file("data/kroA100.tsp");
-    assert(write_entire_file("results/pos.dat", kroA100.positions));
+    write_entire_file("results/kroA100/pos.dat", kroA100.positions);
+    printf("running experiments for kroA100");
+    run_experiment_2_for_instance(kroA100, "kroA100");
 
-    auto s1 = greedy_loop(kroA100.graph);
-    printf("greedy score: %d\n", score(kroA100.graph, s1));
 
-    auto s2 = neighbour_search_edge(kroA100.graph, s1, false);
-    printf("edge search steepest: %d\n", score(kroA100.graph, s2));
+    auto kroB100 = parse_file("data/kroB100.tsp");
+    write_entire_file("results/kroB100/pos.dat", kroB100.positions);
+    printf("running experiments for kroB100");
+    run_experiment_2_for_instance(kroA100, "kroB100");
+}
 
-    auto s3 = neighbour_search_edge(kroA100.graph, s1, true);
-    printf("edge search greedy:   %d\n", score(kroA100.graph, s3));
+int main() {
+    // srand(time(0));
+    srand(7);
 
-    auto s4 = neighbour_search_node(kroA100.graph, s1, false);
-    printf("node search steepest: %d\n", score(kroA100.graph, s4));
+    // auto kroA100 = parse_file("data/kroA100.tsp");
+    // assert(write_entire_file("results/pos.dat", kroA100.positions));
 
-    auto s5 = neighbour_search_node(kroA100.graph, s1, true);
-    printf("node search greedy:   %d\n", score(kroA100.graph, s5));
+    // auto s1 = greedy_loop(kroA100.graph);
+    // printf("greedy score: %d\n", score(kroA100.graph, s1));
 
-    auto r1 = random_solution(kroA100.graph.dim);
-    printf("random score: %d\n", score(kroA100.graph, r1));
+    // auto s2 = neighbour_search_edge(kroA100.graph, s1, false);
+    // printf("edge search steepest: %d\n", score(kroA100.graph, s2));
 
-    auto r2 = neighbour_search_edge(kroA100.graph, r1, false);
-    printf("edge search steepest: %d\n", score(kroA100.graph, r2));
+    // auto s3 = neighbour_search_edge(kroA100.graph, s1, true);
+    // printf("edge search greedy:   %d\n", score(kroA100.graph, s3));
 
-    auto r3 = neighbour_search_edge(kroA100.graph, r1, true);
-    printf("edge search greedy:   %d\n", score(kroA100.graph, r3));
+    // auto s4 = neighbour_search_node(kroA100.graph, s1, false);
+    // printf("node search steepest: %d\n", score(kroA100.graph, s4));
 
-    auto r4 = neighbour_search_node(kroA100.graph, r1, false);
-    printf("node search steepest: %d\n", score(kroA100.graph, r4));
+    // auto s5 = neighbour_search_node(kroA100.graph, s1, true);
+    // printf("node search greedy:   %d\n", score(kroA100.graph, s5));
 
-    auto r5 = neighbour_search_node(kroA100.graph, r1, true);
-    printf("node search greedy:   %d\n", score(kroA100.graph, r5));
+    // auto r1 = random_solution(kroA100.graph.dim);
+    // printf("random score: %d\n", score(kroA100.graph, r1));
 
-    auto s6 = random_walk(s1, 10);
-    printf("random walk:   %d\n", score(kroA100.graph, s6));
+    // auto r2 = neighbour_search_edge(kroA100.graph, r1, false);
+    // printf("edge search steepest: %d\n", score(kroA100.graph, r2));
 
-    write_entire_file("results/a.dat", s2.loop_a);
-    write_entire_file("results/b.dat", s2.loop_b);
+    // auto r3 = neighbour_search_edge(kroA100.graph, r1, true);
+    // printf("edge search greedy:   %d\n", score(kroA100.graph, r3));
+
+    // auto r4 = neighbour_search_node(kroA100.graph, r1, false);
+    // printf("node search steepest: %d\n", score(kroA100.graph, r4));
+
+    // auto r5 = neighbour_search_node(kroA100.graph, r1, true);
+    // printf("node search greedy:   %d\n", score(kroA100.graph, r5));
+
+    // auto s6 = random_walk(s1, 10);
+    // printf("random walk:   %d\n", score(kroA100.graph, s6));
+
+    // write_entire_file("results/a.dat", s2.loop_a);
+    // write_entire_file("results/b.dat", s2.loop_b);
+
+    local_search_experiments();
 
     return 0;
 }
