@@ -2,6 +2,7 @@
 #%%
 import numpy as np
 import matplotlib.pyplot as plt
+import itertools
 
 if 1:
     # dumb debug code
@@ -24,14 +25,18 @@ if 1:
 
 instances = ["kroA100", "kroB100"]
 methods = ["greedy_simple", "greedy_loop", "regret_loop"]
-names_map = {"greedy_simple": "Metoda najbliższego sąsiada", "greedy_loop": "Metoda rozbudowy cyklu", "regret_loop": "2-żal"}
+initial_solutions = ["random_loop", "greedy_loop"]
+methods = ["random_walk", "greedy-neighbour_search_node", "greedy-neighbour_search_edge", "best-neighbour_search_node", "best-neighbour_search_edge"]
+
+solutions = list(itertools.product([initial_solutions[0]], methods)) + list(itertools.product([initial_solutions[1]], methods))
 
 for instance in instances:
     pos = np.fromfile(f'results/{instance}/pos.dat', dtype=np.int32)
     pos = pos.reshape([-1, 2])
-    for method in methods: 
-        a = np.fromfile(f'results/{instance}/{method}-a.dat', dtype=np.int32)
-        b = np.fromfile(f'results/{instance}/{method}-b.dat', dtype=np.int32)
+    for solution in solutions:
+        solution = "-".join(list(solution))
+        a = np.fromfile(f'results/{instance}/{solution}-a.dat', dtype=np.int32)
+        b = np.fromfile(f'results/{instance}/{solution}-b.dat', dtype=np.int32)
 
         pa = pos[a]
         pb = pos[b]
@@ -45,6 +50,6 @@ for instance in instances:
         plt.scatter(xb, yb)
         ax = plt.gca()
         ax.axis('off')
-        plt.savefig(f'results/instance-{instance}-method-{method}', dpi=300, pad_inches=0, bbox_inches='tight')
+        plt.savefig(f'results/{instance}-{solution}', dpi=300, pad_inches=0, bbox_inches='tight')        
         plt.show()
         plt.clf()
