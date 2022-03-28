@@ -9,7 +9,8 @@
 #include <set>
 #include <string>
 #include <assert.h>
-#include <chrono>
+#define SOKOL_IMPL
+#include "sokol_time.h"
 
 typedef uint8_t  u8;
 typedef uint16_t u16;
@@ -719,12 +720,15 @@ Solution random_solution(s32 node_count) {
     return result;
 }
 
-Solution random_walk(Solution init, s32 steps) {
-    auto result = init;
+Solution random_walk(GraphMatrix graph, Solution init, s32 steps) {
+    auto current_solution = init;
 
     std::vector<s32> *loops[2];
-    loops[0] = &result.loop_a;
-    loops[1] = &result.loop_b;
+    loops[0] = &current_solution.loop_a;
+    loops[1] = &current_solution.loop_b;
+
+    Solution best_solution = init;
+    auto best_score = score(graph, init);
 
     for (s32 i = 0; i < steps; i++) {
         s32 move_type = rand() % 3;
@@ -762,15 +766,21 @@ Solution random_walk(Solution init, s32 steps) {
             } break;
             case 2: {
                 // switch two nodes from different loops
-                s32 node_i = rand() % result.loop_a.size();
-                s32 node_j = rand() % result.loop_b.size();
-                s32 t = result.loop_a[node_i];
-                result.loop_a[node_i] = result.loop_b[node_j];
-                result.loop_b[node_j] = t;
+                s32 node_i = rand() % current_solution.loop_a.size();
+                s32 node_j = rand() % current_solution.loop_b.size();
+                s32 t = current_solution.loop_a[node_i];
+                current_solution.loop_a[node_i] = current_solution.loop_b[node_j];
+                current_solution.loop_b[node_j] = t;
             } break;
+           
+            auto new_score = score(graph, current_solution);
+            if (new_score < best_score) {
+                best_score = new_score;
+                best_solution = current_solution;
+            }
         }
     }
-    return result;
+    return best_solution;
 }
 
 typedef Solution (*LS_Solver)(GraphMatrix graph, Solution init, bool greedy);
@@ -784,7 +794,7 @@ ExperimentResult run_experiment_2(Instance instance, bool use_random_solution, L
     s32 n = 100;
     s32 total_score = 0;
     
-    auto start = std::chrono::steady_clock::now();
+    auto start = stm_now();
     
     for (int i = 0; i < n; i++) {
         auto initial_solution = use_random_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
@@ -809,9 +819,8 @@ ExperimentResult run_experiment_2(Instance instance, bool use_random_solution, L
     sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
     write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
 
-    auto end = std::chrono::steady_clock::now();
-    std::chrono::duration<double> elapsed_seconds = end-start;
-    printf("elapsed time: %f\n", elapsed_seconds.count());
+    f32 elapsed = stm_sec(stm_since(start));
+    printf("elapsed time: %f\n", elapsed);
     verify_solution(instance_name, method_name, instance, experiment_result.best_solution);
     printf("%s %s: %.2f (%d - %d)\n\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max);
 
@@ -827,11 +836,11 @@ ExperimentResult run_random_walk_experiment_2(Instance instance, bool use_random
     s32 n = 100;
     s32 total_score = 0;
 
-    auto start = std::chrono::steady_clock::now();
+    auto start = stm_now();
 
     for (int i = 0; i < n; i++) {
         auto initial_solution = use_random_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
-        auto solution =  random_walk(initial_solution, steps);
+        auto solution =  random_walk(instance.graph, initial_solution, steps);
         auto solution_score = score(instance.graph, solution);
         total_score += solution_score;
 
@@ -851,9 +860,8 @@ ExperimentResult run_random_walk_experiment_2(Instance instance, bool use_random
     sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
     write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
 
-    auto end = std::chrono::steady_clock::now();
-    std::chrono::duration<double> elapsed_seconds = end-start;
-    printf("elapsed time: %f\n", elapsed_seconds.count());
+    f32 elapsed = stm_sec(stm_since(start));
+    printf("elapsed time: %f\n", elapsed);
     verify_solution(instance_name, method_name, instance, experiment_result.best_solution);
     printf("%s %s: %.2f (%d - %d)\n\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max);
 
@@ -894,6 +902,7 @@ void local_search_experiments() {
 
 int main() {
     srand(time(0));
+    stm_setup();
 
     local_search_experiments();
 
