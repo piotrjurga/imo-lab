@@ -793,12 +793,18 @@ ExperimentResult run_experiment_2(Instance instance, bool use_random_solution, L
         };
     s32 n = 100;
     s32 total_score = 0;
-
-    auto start = stm_now();
-
+    f64 min_time = __DBL_MAX__;
+    f64 max_time = 0;
+    f64 total_time = 0;
+    
     for (int i = 0; i < n; i++) {
+        auto start = stm_now();
         auto initial_solution = use_random_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
-        auto solution = local_search_method(instance.graph, initial_solution, greedy);
+        auto solution =  local_search_method(instance.graph, initial_solution, greedy);
+        f64 elapsed = stm_ms(stm_since(start));
+        if (elapsed < min_time) min_time = elapsed;
+        if (elapsed > max_time) max_time = elapsed;
+        total_time += elapsed;
         auto solution_score = score(instance.graph, solution);
         total_score += solution_score;
 
@@ -812,6 +818,7 @@ ExperimentResult run_experiment_2(Instance instance, bool use_random_solution, L
     }
 
     experiment_result.average = total_score/(f64)n;
+    auto average_time = total_time/(f64)n;
 
     char result_filepath[128];
     sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
@@ -819,10 +826,9 @@ ExperimentResult run_experiment_2(Instance instance, bool use_random_solution, L
     sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
     write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
 
-    f32 elapsed = stm_sec(stm_since(start));
-    printf("elapsed time: %f\n", elapsed);
     verify_solution(instance_name, method_name, instance, experiment_result.best_solution);
-    printf("%s %s: %.2f (%d - %d)\n\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max);
+    printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, min_time, max_time);
+
 
     return experiment_result;
 }
@@ -835,12 +841,21 @@ ExperimentResult run_random_walk_experiment_2(Instance instance, bool use_random
         };
     s32 n = 100;
     s32 total_score = 0;
+    f64 min_time = __DBL_MAX__;
+    f64 max_time = 0;
+    f64 total_time = 0;
+    
 
     auto start = stm_now();
 
     for (int i = 0; i < n; i++) {
+        auto start = stm_now();
         auto initial_solution = use_random_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
         auto solution =  random_walk(instance.graph, initial_solution, steps);
+        f64 elapsed = stm_ms(stm_since(start));
+        if (elapsed < min_time) min_time = elapsed;
+        if (elapsed > max_time) max_time = elapsed;
+        total_time += elapsed;
         auto solution_score = score(instance.graph, solution);
         total_score += solution_score;
 
@@ -853,6 +868,7 @@ ExperimentResult run_random_walk_experiment_2(Instance instance, bool use_random
         }
     }
     experiment_result.average = total_score/(f64)n;
+    auto average_time = total_time/(f64)n;
 
     char result_filepath[128];
     sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
@@ -860,10 +876,9 @@ ExperimentResult run_random_walk_experiment_2(Instance instance, bool use_random
     sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
     write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
 
-    f32 elapsed = stm_sec(stm_since(start));
-    printf("elapsed time: %f\n", elapsed);
+    f64 elapsed = stm_ms(stm_since(start));
     verify_solution(instance_name, method_name, instance, experiment_result.best_solution);
-    printf("%s %s: %.2f (%d - %d)\n\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max);
+    printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, min_time, max_time);
 
     return experiment_result;
 }
