@@ -333,7 +333,7 @@ Solution regret_loop(GraphMatrix graph) {
                     s32 node_a = a[edge];
                     s32 node_b = a[(edge+1) % a.size()];
                     s32 cost = graph.get(node, node_a) + graph.get(node, node_b) - graph.get(node_a, node_b);
-                    
+
                     if (cost <= best.cost) {
                         second_best = best;
                         best.cycle = 0;
@@ -426,7 +426,7 @@ s32 score(GraphMatrix graph, Solution s) {
 void verify_solution(const char* instance_name, const char* method_name, Instance instance, Solution s) {
     std::set<s32> a(s.loop_a.begin(), s.loop_a.end());
     std::set<s32> b(s.loop_b.begin(), s.loop_b.end());
-    
+
     std::set<s32> u;
     std::set_union(a.begin(), a.end(),
                 b.begin(), b.end(),
@@ -772,7 +772,7 @@ Solution random_walk(GraphMatrix graph, Solution init, s32 steps) {
                 current_solution.loop_a[node_i] = current_solution.loop_b[node_j];
                 current_solution.loop_b[node_j] = t;
             } break;
-           
+
             auto new_score = score(graph, current_solution);
             if (new_score < best_score) {
                 best_score = new_score;
@@ -793,12 +793,12 @@ ExperimentResult run_experiment_2(Instance instance, bool use_random_solution, L
         };
     s32 n = 100;
     s32 total_score = 0;
-    
+
     auto start = stm_now();
-    
+
     for (int i = 0; i < n; i++) {
         auto initial_solution = use_random_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
-        auto solution =  local_search_method(instance.graph, initial_solution, greedy);
+        auto solution = local_search_method(instance.graph, initial_solution, greedy);
         auto solution_score = score(instance.graph, solution);
         total_score += solution_score;
 
@@ -810,7 +810,7 @@ ExperimentResult run_experiment_2(Instance instance, bool use_random_solution, L
             experiment_result.max = solution_score;
         }
     }
-    
+
     experiment_result.average = total_score/(f64)n;
 
     char result_filepath[128];
@@ -900,11 +900,156 @@ void local_search_experiments() {
     run_experiment_2_for_instance(kroB100, "kroB100");
 }
 
+struct SolutionList {
+    std::vector<s32> nodes; // nodes[node] = next_node
+    s32 start_a;
+    s32 start_b;
+};
+
+// convert a visit-order node list to node-order next list
+SolutionList to_linked_list(Solution solution) {
+    SolutionList result;
+    result.nodes.resize(solution.loop_a.size() + solution.loop_b.size());
+    s32 last = solution.loop_a.back();
+    result.start_a = last;
+    for (s32 next : solution.loop_a) {
+        result.nodes[last] = next;
+        last = next;
+    }
+    last = solution.loop_b.back();
+    result.start_b = last;
+    for (s32 next : solution.loop_b) {
+        result.nodes[last] = next;
+        last = next;
+    }
+    return result;
+}
+
+Solution to_visit_list(SolutionList solution) {
+    Solution result;
+    s32 dim = solution.nodes.size();
+
+    result.loop_a.resize(dim/2 + (dim&1));
+    s32 node = solution.start_a;
+    s32 i = 0;
+    do {
+        node = solution.nodes[node];
+        result.loop_a[i] = node;
+        i++;
+    } while (node != solution.start_a);
+
+    result.loop_b.resize(dim/2);
+    node = solution.start_b;
+    i = 0;
+    do {
+        node = solution.nodes[node];
+        result.loop_b[i] = node;
+        i++;
+    } while (node != solution.start_b);
+
+    assert(i == result.loop_b.size());
+
+    return result;
+}
+
+enum ExchangeType {
+    EXCHANGE_LOOP_A  = 0,
+    EXCHANGE_LOOP_B  = 1,
+    EXCHANGE_LOOP_AB = 2,
+};
+
+struct Exchange {
+    s32 delta;
+    ExchangeType type;
+    union {
+        struct { // edge exchange
+            s32 i_from, i_to;
+            s32 j_from, j_to;
+        };
+        struct { // node exchange
+            s32 i_prev, i_curr, i_next;
+            s32 j_prev, j_curr, j_next;
+        };
+    };
+};
+
+bool operator <(const Exchange& lhs, const Exchange& rhs) {
+    return lhs.delta < rhs.delta;
+}
+
+Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
+    // create a sorted list of all moves
+    std::multiset<Exchange> moves;
+
+    // add all the edge exchange moves
+    std::vector<s32> *loops[2] = { &init.loop_a, &init.loop_b };
+    for (s32 loop_i = 0; loop_i < 2; loop_i++) {
+        auto& loop = *loops[loop_i];
+        s32 loop_count = loop.size();
+        Exchange move;
+        move.type = (ExchangeType)loop_i;
+        for (s32 i = 0; i < loop_count; i++) {
+            move.i_from = loop[i];
+            move.i_to = loop[(i+1) % loop_count];
+            s32 i_cost = graph.get(move.i_from, move.i_to);
+            for (s32 j = i+1; j < loop_count; j++) {
+                move.j_from = loop[j];
+                move.j_to = loop[(j+1) % loop_count];
+                s32 j_cost = graph.get(move.j_from, move.j_to);
+
+                s32 new_i_cost = graph.get(move.j_from, move.i_from);
+                s32 new_j_cost = graph.get(move.j_to, move.i_to);
+                move.delta = new_i_cost + new_j_cost - i_cost - j_cost;
+                if (move.delta < 0) moves.insert(move);
+            }
+        }
+    }
+
+    // add all the node exchange moves
+    {
+        Exchange move;
+        move.type = EXCHANGE_LOOP_AB;
+
+        auto& loop_i = init.loop_a;
+        auto& loop_j = init.loop_b;
+        s32 loop_i_count = loop_i.size();
+        s32 loop_j_count = loop_j.size();
+        for (s32 i = 0; i < loop_i_count; i++) {
+            move.i_prev = loop_i[(i-1+loop_i_count) % loop_i_count];
+            move.i_curr = loop_i[i];
+            move.i_next = loop_i[(i+1) % loop_i_count];
+            s32 i_cost = graph.get(move.i_curr, move.i_prev) +
+                         graph.get(move.i_curr, move.i_next);
+            for (s32 j = 0; j < loop_j.size(); j++) {
+                move.j_prev = loop_j[(j-1+loop_j_count) % loop_j_count];
+                move.j_curr = loop_j[j];
+                move.j_next = loop_j[(j+1) % loop_j_count];
+                s32 j_cost = graph.get(move.j_curr, move.j_prev) +
+                             graph.get(move.j_curr, move.j_next);
+                s32 new_i_cost = graph.get(move.j_curr, move.i_prev) +
+                                 graph.get(move.j_curr, move.i_next);
+                s32 new_j_cost = graph.get(move.i_curr, move.j_prev) +
+                                 graph.get(move.i_curr, move.j_next);
+                move.delta = new_i_cost + new_j_cost - i_cost - j_cost;
+                if (move.delta < 0) moves.insert(move);
+            }
+        }
+    }
+
+    auto list = to_linked_list(init);
+
+    // TODO(piotr): apply moves until there are none left
+
+    return to_visit_list(list);
+}
+
 int main() {
     srand(time(0));
     stm_setup();
 
-    local_search_experiments();
+    auto instance = parse_file("data/kroA200.tsp");
+    auto init = greedy_loop(instance.graph);
+    auto better = neighbour_search_edge_cache(instance.graph, init);
 
     return 0;
 }
