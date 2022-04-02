@@ -793,15 +793,15 @@ ExperimentResult run_experiment_2(Instance instance, bool use_random_solution, L
         };
     s32 n = 100;
     s32 total_score = 0;
-    f64 min_time = __DBL_MAX__;
-    f64 max_time = 0;
-    f64 total_time = 0;
+    u64 min_time = INT64_MAX;
+    u64 max_time = 0;
+    u64 total_time = 0;
     
     for (int i = 0; i < n; i++) {
-        auto start = stm_now();
+        u64 start = stm_now();
         auto initial_solution = use_random_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
         auto solution =  local_search_method(instance.graph, initial_solution, greedy);
-        f64 elapsed = stm_ms(stm_since(start));
+        u64 elapsed = stm_since(start);
         if (elapsed < min_time) min_time = elapsed;
         if (elapsed > max_time) max_time = elapsed;
         total_time += elapsed;
@@ -818,7 +818,7 @@ ExperimentResult run_experiment_2(Instance instance, bool use_random_solution, L
     }
 
     experiment_result.average = total_score/(f64)n;
-    auto average_time = total_time/(f64)n;
+    auto average_time = stm_ms(total_time)/(f64)n;
 
     char result_filepath[128];
     sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
@@ -827,7 +827,7 @@ ExperimentResult run_experiment_2(Instance instance, bool use_random_solution, L
     write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
 
     verify_solution(instance_name, method_name, instance, experiment_result.best_solution);
-    printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, min_time, max_time);
+    printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, stm_ms(min_time), stm_ms(max_time));
 
 
     return experiment_result;
@@ -841,18 +841,15 @@ ExperimentResult run_random_walk_experiment_2(Instance instance, bool use_random
         };
     s32 n = 100;
     s32 total_score = 0;
-    f64 min_time = __DBL_MAX__;
-    f64 max_time = 0;
-    f64 total_time = 0;
+    u64 min_time = UINT64_MAX;
+    u64 max_time = 0;
+    u64 total_time = 0;
     
-
-    auto start = stm_now();
-
     for (int i = 0; i < n; i++) {
-        auto start = stm_now();
+        u64 start = stm_now();
         auto initial_solution = use_random_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
         auto solution =  random_walk(instance.graph, initial_solution, steps);
-        f64 elapsed = stm_ms(stm_since(start));
+        u64 elapsed = stm_since(start);
         if (elapsed < min_time) min_time = elapsed;
         if (elapsed > max_time) max_time = elapsed;
         total_time += elapsed;
@@ -868,7 +865,7 @@ ExperimentResult run_random_walk_experiment_2(Instance instance, bool use_random
         }
     }
     experiment_result.average = total_score/(f64)n;
-    auto average_time = total_time/(f64)n;
+    f64 average_time = stm_ms(total_time)/(f64)n;
 
     char result_filepath[128];
     sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
@@ -876,9 +873,8 @@ ExperimentResult run_random_walk_experiment_2(Instance instance, bool use_random
     sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
     write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
 
-    f64 elapsed = stm_ms(stm_since(start));
     verify_solution(instance_name, method_name, instance, experiment_result.best_solution);
-    printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, min_time, max_time);
+    printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, stm_ms(min_time), stm_ms(max_time));
 
     return experiment_result;
 }
@@ -1062,9 +1058,13 @@ int main() {
     srand(time(0));
     stm_setup();
 
+#if 0
     auto instance = parse_file("data/kroA200.tsp");
     auto init = greedy_loop(instance.graph);
     auto better = neighbour_search_edge_cache(instance.graph, init);
+#endif
+
+    local_search_experiments();
 
     return 0;
 }
