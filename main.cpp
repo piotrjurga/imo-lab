@@ -423,7 +423,7 @@ s32 score(GraphMatrix graph, Solution s) {
     return cost;
 }
 
-void verify_solution(const char* instance_name, const char* method_name, Instance instance, Solution s) {
+void verify_solution(Instance instance, Solution s) {
     std::set<s32> a(s.loop_a.begin(), s.loop_a.end());
     std::set<s32> b(s.loop_b.begin(), s.loop_b.end());
 
@@ -478,7 +478,7 @@ ExperimentResult run_experiment(Instance instance, Solver solving_method, const 
     sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
     write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
 
-    verify_solution(instance_name, method_name, instance, experiment_result.best_solution);
+    verify_solution(instance, experiment_result.best_solution);
     printf("%s %s: %.2f (%d - %d)\n\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max);
 
     return experiment_result;
@@ -826,7 +826,7 @@ ExperimentResult run_experiment_2(Instance instance, bool use_random_solution, L
     sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
     write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
 
-    verify_solution(instance_name, method_name, instance, experiment_result.best_solution);
+    verify_solution(instance, experiment_result.best_solution);
     printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, stm_ms(min_time), stm_ms(max_time));
 
 
@@ -873,7 +873,7 @@ ExperimentResult run_random_walk_experiment_2(Instance instance, bool use_random
     sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
     write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
 
-    verify_solution(instance_name, method_name, instance, experiment_result.best_solution);
+    verify_solution(instance, experiment_result.best_solution);
     printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, stm_ms(min_time), stm_ms(max_time));
 
     return experiment_result;
@@ -911,52 +911,73 @@ void local_search_experiments() {
     run_experiment_2_for_instance(kroB100, "kroB100");
 }
 
-struct SolutionList {
-    std::vector<s32> nodes; // nodes[node] = next_node
-    s32 start_a;
-    s32 start_b;
+struct Node {
+    s32 next;
+    s32 prev;
 };
 
-// convert a visit-order node list to node-order next list
+struct SolutionList {
+    std::vector<Node> nodes;
+    std::vector<bool> loop; // loop[node] == 0 if node in loop_a, else 1
+
+    Node& operator [](s32 idx) {
+        return nodes[idx];
+    }
+};
+
+s32 find(std::vector<bool>& v, bool value) {
+    for (s32 i = 0; i < v.size(); i++) {
+        if (v[i] == value) return i;
+    }
+    return v.size();
+}
+
+// convert a visit-order node list to node-order doubly linked list
 SolutionList to_linked_list(Solution solution) {
     SolutionList result;
-    result.nodes.resize(solution.loop_a.size() + solution.loop_b.size());
+    s32 dim = solution.loop_a.size() + solution.loop_b.size();
+    result.nodes.resize(dim);
+    result.loop.resize(dim);
     s32 last = solution.loop_a.back();
-    result.start_a = last;
     for (s32 next : solution.loop_a) {
-        result.nodes[last] = next;
+        result[last].next = next;
+        result[next].prev = last;
+        result.loop[next] = 0;
         last = next;
     }
     last = solution.loop_b.back();
-    result.start_b = last;
     for (s32 next : solution.loop_b) {
-        result.nodes[last] = next;
+        result[last].next = next;
+        result[next].prev = last;
+        result.loop[next] = 1;
         last = next;
     }
     return result;
 }
 
-Solution to_visit_list(SolutionList solution) {
+Solution to_visit_list(SolutionList list) {
     Solution result;
-    s32 dim = solution.nodes.size();
+    s32 dim = list.nodes.size();
 
     result.loop_a.resize(dim/2 + (dim&1));
-    s32 node = solution.start_a;
+    s32 start = find(list.loop, 0);
+    s32 node = start;
     s32 i = 0;
     do {
-        node = solution.nodes[node];
+        node = list[node].next;
         result.loop_a[i] = node;
         i++;
-    } while (node != solution.start_a);
+    } while (node != start);
 
     result.loop_b.resize(dim/2);
-    node = solution.start_b;
+    start = find(list.loop, 1);
+    node = start;
     i = 0;
     do {
-        node = solution.nodes[node];
+        node = list[node].next;
         result.loop_b[i] = node;
         i++;
-    } while (node != solution.start_b);
+    } while (node != start);
 
     assert(i == result.loop_b.size());
 
@@ -988,6 +1009,56 @@ bool operator <(const Exchange& lhs, const Exchange& rhs) {
     return lhs.delta < rhs.delta;
 }
 
+inline s32 node_exchange_delta(GraphMatrix graph, Exchange move) {
+    s32 new_i_next = (move.j_next != move.i_curr) ? move.j_next : move.j_curr;
+    s32 new_j_next = (move.i_next != move.j_curr) ? move.i_next : move.i_curr;
+    s32 i_cost = graph.get(move.i_curr, move.i_prev) +
+                 graph.get(move.i_curr, move.i_next);
+    s32 j_cost = graph.get(move.j_curr, move.j_prev) +
+                 graph.get(move.j_curr, move.j_next);
+    s32 new_i_cost = graph.get(move.j_curr, move.i_prev) +
+                     graph.get(move.j_curr, new_j_next);
+    s32 new_j_cost = graph.get(move.i_curr, move.j_prev) +
+                     graph.get(move.i_curr, new_i_next);
+    return new_i_cost + new_j_cost - i_cost - j_cost;
+}
+
+void print_move(Exchange move) {
+    bool node_move = move.type == EXCHANGE_LOOP_AB;
+    printf("%s move:\n", node_move ? "node" : "edge");
+    printf("\tdelta = %d\n", move.delta);
+    if (node_move) {
+        printf("\ti = %d\n", move.i_curr);
+        printf("\tj = %d\n", move.j_curr);
+    } else {
+        printf("\ti = (%d; %d)\n", move.i_from, move.i_to);
+        printf("\tj = (%d; %d)\n", move.j_from, move.j_to);
+    }
+}
+
+void print_loops(SolutionList& list) {
+    printf("A: ");
+    s32 start = find(list.loop, 0);
+    s32 node = start;
+    s32 count_a = 0;
+    do {
+        node = list[node].next;
+        count_a++;
+        printf("%d-", node);
+    } while (node != start && count_a < list.nodes.size());
+
+    printf("\nB: ");
+    start = find(list.loop, 1);
+    node = start;
+    s32 count_b = 0;
+    do {
+        node = list[node].next;
+        count_b++;
+        printf("%d-", node);
+    } while (node != start && count_b < list.nodes.size());
+    printf("\nA count: %d\tB count: %d\n", count_a, count_b);
+}
+
 Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
     // create a sorted list of all moves
     std::multiset<Exchange> moves;
@@ -1007,7 +1078,6 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
                 move.j_from = loop[j];
                 move.j_to = loop[(j+1) % loop_count];
                 s32 j_cost = graph.get(move.j_from, move.j_to);
-
                 s32 new_i_cost = graph.get(move.j_from, move.i_from);
                 s32 new_j_cost = graph.get(move.j_to, move.i_to);
                 move.delta = new_i_cost + new_j_cost - i_cost - j_cost;
@@ -1029,19 +1099,11 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
             move.i_prev = loop_i[(i-1+loop_i_count) % loop_i_count];
             move.i_curr = loop_i[i];
             move.i_next = loop_i[(i+1) % loop_i_count];
-            s32 i_cost = graph.get(move.i_curr, move.i_prev) +
-                         graph.get(move.i_curr, move.i_next);
             for (s32 j = 0; j < loop_j.size(); j++) {
                 move.j_prev = loop_j[(j-1+loop_j_count) % loop_j_count];
                 move.j_curr = loop_j[j];
                 move.j_next = loop_j[(j+1) % loop_j_count];
-                s32 j_cost = graph.get(move.j_curr, move.j_prev) +
-                             graph.get(move.j_curr, move.j_next);
-                s32 new_i_cost = graph.get(move.j_curr, move.i_prev) +
-                                 graph.get(move.j_curr, move.i_next);
-                s32 new_j_cost = graph.get(move.i_curr, move.j_prev) +
-                                 graph.get(move.i_curr, move.j_next);
-                move.delta = new_i_cost + new_j_cost - i_cost - j_cost;
+                move.delta = node_exchange_delta(graph, move);
                 if (move.delta < 0) moves.insert(move);
             }
         }
@@ -1049,22 +1111,221 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
 
     auto list = to_linked_list(init);
 
-    // TODO(piotr): apply moves until there are none left
+    while (!moves.empty()) {
+        s32 modified_nodes[6];
+        s32 modified_nodes_count = 0;
+        s32 new_edges[4];
+        s32 new_edges_count = 0;
+        bool move_applied = false;
+        for (auto it = moves.begin(); it != moves.end();) {
+            bool do_remove = false;
+            bool do_break = false;
+            auto move = *it;
+            //print_move(move);
+            switch (move.type) {
+                case EXCHANGE_LOOP_A:
+                case EXCHANGE_LOOP_B: {
+                    bool i_correct = list[move.i_from].next == move.i_to;
+                    bool i_reverse = list[move.i_from].prev == move.i_to;
+                    bool j_correct = list[move.j_from].next == move.j_to;
+                    bool j_reverse = list[move.j_from].prev == move.j_to;
+                    if (!(i_correct || i_reverse) || !(j_correct || j_reverse)) {
+                        do_remove = true;
+                        break;
+                    }
+                    if (i_correct != j_correct) {
+                        // the move may be applicable later but it is not now
+                        // so we leave it in, but go to the next one
+                        break; 
+                    }
+
+                    // if we got here, the move is applicable
+
+                    //printf("i, j correct = (%d, %d)\n", i_correct, j_correct);
+                    if (i_reverse) {
+                        s32 t = move.i_to;
+                        move.i_to = move.i_from;
+                        move.i_from = t;
+                        t = move.j_to;
+                        move.j_to = move.j_from;
+                        move.j_from = t;
+                    }
+
+                    list[move.i_from].next = move.j_from;
+                    list[move.j_from].next = list[move.j_from].prev;
+                    list[move.j_from].prev = move.i_from;
+
+                    list[move.j_to].prev = move.i_to;
+                    list[move.i_to].prev = list[move.i_to].next;
+                    list[move.i_to].next = move.j_to;
+
+                    s32 node = list[move.i_to].prev;
+                    while (node != move.j_from) {
+                        s32 t = list[node].next;
+                        list[node].next = list[node].prev;
+                        node = list[node].prev = t;
+                    }
+                    do_remove = true;
+                    do_break = true;
+                    modified_nodes[0] = move.i_from;
+                    modified_nodes[1] = move.j_from;
+                    modified_nodes[2] = move.i_to;
+                    modified_nodes[3] = move.j_to;
+                    modified_nodes_count = 4;
+                    new_edges[0] = move.i_from;
+                    new_edges[1] = move.i_to;
+                    new_edges_count = 2;
+                } break;
+                case EXCHANGE_LOOP_AB: {
+                    bool i_correct = (list[move.i_prev].next == move.i_curr) &&
+                                     (list[move.i_curr].next == move.i_next);
+                    bool i_reverse = (list[move.i_prev].prev == move.i_curr) &&
+                                     (list[move.i_curr].prev == move.i_next);
+                    bool j_correct = (list[move.j_prev].next == move.j_curr) &&
+                                     (list[move.j_curr].next == move.j_next);
+                    bool j_reverse = (list[move.j_prev].prev == move.j_curr) &&
+                                     (list[move.j_curr].prev == move.j_next);
+                    if (!(i_correct || i_reverse) || !(j_correct || j_reverse)) {
+                        do_remove = true;
+                        break;
+                    }
+
+                    // if we got here, the move is applicable
+
+                    print_move(move);
+
+                    if (i_reverse) {
+                        s32 t = move.i_next;
+                        move.i_next = move.i_prev;
+                        move.i_prev = t;
+                    }
+                    if (j_reverse) {
+                        s32 t = move.j_next;
+                        move.j_next = move.j_prev;
+                        move.j_prev = t;
+                    }
+
+                    assert(list.loop[move.i_curr] != list.loop[move.j_curr]);
+                    list.loop[move.i_curr] = !list.loop[move.i_curr];
+                    list.loop[move.j_curr] = !list.loop[move.j_curr];
+
+                    list[move.i_prev].next = move.j_curr;
+                    list[move.j_curr].prev = move.i_prev;
+                    list[move.j_curr].next = move.i_next;
+                    list[move.i_next].prev = move.j_curr;
+
+                    list[move.j_prev].next = move.i_curr;
+                    list[move.i_curr].prev = move.j_prev;
+                    list[move.i_curr].next = move.j_next;
+                    list[move.j_next].prev = move.i_curr;
+
+                    do_remove = true;
+                    do_break = true;
+                    modified_nodes[0] = move.i_prev;
+                    modified_nodes[1] = move.i_curr;
+                    modified_nodes[2] = move.i_next;
+                    modified_nodes[3] = move.j_prev;
+                    modified_nodes[4] = move.j_curr;
+                    modified_nodes[5] = move.j_next;
+                    modified_nodes_count = 6;
+                    new_edges[0] = move.i_prev;
+                    new_edges[1] = move.i_curr;
+                    new_edges[2] = move.j_prev;
+                    new_edges[3] = move.j_curr;
+                    new_edges_count = 4;
+                } break;
+            }
+
+            // C++ spec is not great
+            auto it_copy = it;
+            it++;
+            if (do_remove) {
+                //puts("removing");
+                moves.erase(it_copy);
+            }
+            if (do_break) {
+                move_applied = true;
+                break;
+            }
+        }
+
+        if (!move_applied) break;
+
+        //print_loops(list);
+
+        //puts("adding edge moves");
+        Exchange move;
+        for (s32 i = 0; i < new_edges_count; i++) {
+            move.type = (ExchangeType)!!list.loop[new_edges[i]];
+            move.i_from = new_edges[i];
+            move.i_to = list[move.i_from].next;
+            s32 i_cost = graph.get(move.i_from, move.i_to);
+            move.j_from = move.i_to;
+            while (move.j_from != move.i_from) {
+                move.j_to = list[move.j_from].next;
+                s32 j_cost = graph.get(move.j_from, move.j_to);
+                s32 new_i_cost = graph.get(move.j_from, move.i_from);
+                s32 new_j_cost = graph.get(move.j_to, move.i_to);
+                move.delta = new_i_cost + new_j_cost - i_cost - j_cost;
+                if (move.delta < 0) {
+                    //puts("adding a move:");
+                    //print_move(move);
+                    moves.insert(move);
+                }
+
+                move.j_from = move.j_to;
+            }
+        }
+
+        //puts("adding node moves");
+        move.type = EXCHANGE_LOOP_AB;
+        for (s32 i = 0; i < modified_nodes_count; i++) {
+            move.i_curr = modified_nodes[i];
+            move.i_prev = list[move.i_curr].prev;
+            move.i_next = list[move.i_curr].next;
+
+            bool first_node_loop = list.loop[move.i_curr];
+            s32 j_start = find(list.loop, !first_node_loop);
+            move.j_curr = j_start;
+            do {
+                move.j_prev = list[move.j_curr].prev;
+                move.j_next = list[move.j_curr].next;
+                move.delta = node_exchange_delta(graph, move);
+                if (move.delta < 0) {
+                    //puts("adding a move:");
+                    //print_move(move);
+                    moves.insert(move);
+                }
+                move.j_curr = move.j_next;
+            } while (move.j_curr != j_start);
+        }
+    }
 
     return to_visit_list(list);
 }
 
 int main() {
-    srand(time(0));
+    //srand(time(0));
+    //srand(0); // new implementation better
+    srand(2); // new implementation worse
     stm_setup();
 
-#if 0
     auto instance = parse_file("data/kroA200.tsp");
     auto init = greedy_loop(instance.graph);
-    auto better = neighbour_search_edge_cache(instance.graph, init);
-#endif
 
-    local_search_experiments();
+    s32 start = stm_now();
+    auto better_old = neighbour_search_edge(instance.graph, init, false);
+    s32 old_time = stm_since(start);
+    printf("old implementation score = %d\n", score(instance.graph, better_old));
+    printf("old time = %.3f ms\n", stm_ms(old_time));
+
+    start = stm_now();
+    auto better = neighbour_search_edge_cache(instance.graph, init);
+    s32 new_time = stm_since(start);
+    printf("new implementation score = %d\n", score(instance.graph, better));
+    printf("new time = %.3f ms\n", stm_ms(new_time));
+
+    verify_solution(instance, better);
 
     return 0;
 }
