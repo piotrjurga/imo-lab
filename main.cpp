@@ -1192,7 +1192,7 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
 
                     // if we got here, the move is applicable
 
-                    print_move(move);
+                    //print_move(move);
 
                     if (i_reverse) {
                         s32 t = move.i_next;
