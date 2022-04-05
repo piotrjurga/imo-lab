@@ -1304,6 +1304,133 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
     return to_visit_list(list);
 }
 
+Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 max_neighbours) {
+    Solution result = init;
+
+    std::vector<s32> *loops[2];
+    loops[0] = &result.loop_a;
+    loops[1] = &result.loop_b;
+
+    std::vector<std::vector<std::pair<s32, s32>>> best_neighbours(graph.dim);
+    std::vector<std::pair<s32, s32>> node_neighbours(graph.dim);
+    // prepare closest neighbours (node, cost)
+    for (s32 node=0; node<graph.dim; node++) {
+        for (s32 other_node=0; other_node<graph.dim; other_node++) {
+            node_neighbours[other_node] = std::pair<s32, s32>(other_node, graph.get(node, other_node));
+        }
+        std::sort(node_neighbours.begin(), node_neighbours.end(), [](auto &left, auto &right) {
+            return left.second < right.second;
+        });
+        std::copy(node_neighbours.begin()+1, node_neighbours.end(), std::back_inserter(best_neighbours[node]));
+    }
+
+    while (true) {
+        NodeExchange best = {};
+        NodeExchange best_cross_loop = {};
+        std::vector<s32> *best_loop = NULL;
+        bool should_remove_successor = true;
+
+        s32 loop_offset = rand() & 1;
+        for (s32 loop_i = 0; loop_i < 2; loop_i++) {
+            auto& loop = *loops[(loop_i + loop_offset) & 1];
+            s32 loop_count = loop.size();
+            s32 offset = rand() % loop_count;
+            for (s32 i = 0; i < loop_count; i++) {
+
+                s32 i_node = loop[(i+offset) % loop_count];
+                s32 i_pred = loop[(i-1+offset) % loop_count];
+                s32 i_succ = loop[(i+1+offset) % loop_count];
+
+                s32 i_pred_cost = graph.get(i_pred, i_node);
+                s32 i_succ_cost = graph.get(i_node, i_succ);
+
+                s32 neighbors_visited = 0;
+                for (s32 j = 0; j < max_neighbours; j++) {
+                    s32 candidate_node = best_neighbours[i_node][j].first;
+                    s32 candidate_cost = best_neighbours[i_node][j].second;
+                    for (s32 k = 0; k < loop_count; k++) {
+                        if (loop[k] == candidate_node) {
+                            neighbors_visited++;
+                            s32 candidate_pred = loop[(k-1+offset) % loop_count];
+                            s32 candidate_succ = loop[(k+1+offset) % loop_count];
+                            s32 candidate_pred_cost = graph.get(candidate_pred, candidate_node);
+                            s32 candidate_succ_cost = graph.get(candidate_node, candidate_succ);
+
+                            s32 succ_to_succ_cost = graph.get(i_succ, candidate_succ);
+                            s32 pred_to_pred_cost = graph.get(i_pred, candidate_pred);
+
+                            s32 succ_removal_delta = candidate_cost + succ_to_succ_cost - i_succ_cost - candidate_succ_cost;
+                            s32 pred_removal_delta = candidate_cost + pred_to_pred_cost - i_pred_cost - candidate_pred_cost;
+
+                            s32 delta;
+                            if (succ_removal_delta < pred_removal_delta) {
+                                should_remove_successor = true;
+                                delta = succ_removal_delta;
+                            } else {
+                                should_remove_successor = false;
+                                delta = pred_removal_delta;
+                            }
+
+                            if (delta < best.delta) {
+                                best.delta = delta;
+                                best.i = (i+offset) % loop_count;
+                                best.j = k;
+                                best_loop = &loop;
+                            }
+
+                            break;
+                        }
+                        if (neighbors_visited == max_neighbours) {
+                            break;
+                        }
+                    }
+
+                }
+            }
+        }
+
+        best_cross_loop = best_node_exchange(graph, result.loop_a, result.loop_b, false); // should this also account for closest neighbours in another loop only?
+        if (best_cross_loop.delta < best.delta) {
+            best = best_cross_loop;
+            best_loop = NULL;
+        }
+
+        if (best.delta < 0) {
+            if (best_loop) {
+                auto& loop = *best_loop;
+                s32 edge_i = (best.i < best.j) ? best.i : best.j;
+                s32 edge_j = (best.i > best.j) ? best.i : best.j;
+                if (should_remove_successor) {    
+                    s32 between = (edge_i+1 + edge_j) / 2;
+                    for (s32 i = edge_i+1; i <= between; i++) {
+                        s32 j = edge_j + edge_i+1 - i;
+                        s32 t = loop[i];
+                        loop[i] = loop[j];
+                        loop[j] = t;
+                    }
+                } else {
+                    s32 loop_count = loop.size();
+                    s32 between = ((edge_i-edge_j+loop_count) % loop_count)/2;
+                    for (s32 i = 0; i < between; i++) {
+                        int loop_i = edge_j+i;
+                        int j = (edge_i-1-i+loop_count) % loop_count;
+                        s32 t = loop[loop_i];
+                        loop[loop_i] = loop[j];
+                        loop[j] = t;
+                    }
+                }
+            } else {
+                s32 t = result.loop_a[best.i];
+                result.loop_a[best.i] = result.loop_b[best.j];
+                result.loop_b[best.j] = t;
+            }
+        } else {
+            break;
+        }
+    }
+    return result;
+}
+
 int main() {
     //srand(time(0));
     //srand(0); // new implementation better
