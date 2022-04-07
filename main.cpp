@@ -1304,6 +1304,11 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
     return to_visit_list(list);
 }
 
+struct NodeLoopPosition {
+    s32 loop;
+    s32 position;
+};
+
 Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 max_neighbours) {
     Solution result = init;
 
@@ -1311,7 +1316,19 @@ Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 
     loops[0] = &result.loop_a;
     loops[1] = &result.loop_b;
 
-    std::vector<std::vector<std::pair<s32, s32>>> best_neighbours(graph.dim);
+    // std::vector<std::vector<std::pair<s32, s32>>> best_neighbours(graph.dim);
+    std::vector<NodeLoopPosition> node_loop_positions(graph.dim);
+
+    for (s32 loop_i = 0; loop_i < 2; loop_i++) {
+        auto& loop = *loops[loop_i];
+        for (s32 i = 0; i < loop.size(); i++) {
+            node_loop_positions[loop[i]] = NodeLoopPosition { .loop = loop_i, .position = i};
+        }
+    }
+
+    std::vector<std::pair<s32, s32>> best_neighbours;
+    best_neighbours.reserve(graph.dim*graph.dim);
+
     std::vector<std::pair<s32, s32>> node_neighbours(graph.dim);
     // prepare closest neighbours (node, cost)
     for (s32 node=0; node<graph.dim; node++) {
@@ -1321,7 +1338,7 @@ Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 
         std::sort(node_neighbours.begin(), node_neighbours.end(), [](auto &left, auto &right) {
             return left.second < right.second;
         });
-        std::copy(node_neighbours.begin()+1, node_neighbours.end(), std::back_inserter(best_neighbours[node]));
+        std::copy(node_neighbours.begin(), node_neighbours.end(), std::back_inserter(best_neighbours));
     }
 
     while (true) {
@@ -1345,46 +1362,39 @@ Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 
                 s32 i_succ_cost = graph.get(i_node, i_succ);
 
                 s32 neighbors_visited = 0;
-                for (s32 j = 0; j < max_neighbours; j++) {
-                    s32 candidate_node = best_neighbours[i_node][j].first;
-                    s32 candidate_cost = best_neighbours[i_node][j].second;
-                    for (s32 k = 0; k < loop_count; k++) {
-                        if (loop[k] == candidate_node) {
-                            neighbors_visited++;
-                            s32 candidate_pred = loop[(k-1+offset) % loop_count];
-                            s32 candidate_succ = loop[(k+1+offset) % loop_count];
-                            s32 candidate_pred_cost = graph.get(candidate_pred, candidate_node);
-                            s32 candidate_succ_cost = graph.get(candidate_node, candidate_succ);
+                for (s32 j = 1; j < graph.dim; j++) {
+                    std::pair<s32, s32> candidate = best_neighbours[i_node*graph.dim+j];
+                    s32 candidate_node = candidate.first;
+                    if (node_loop_positions[candidate_node].loop == (loop_i + loop_offset) & 1) {
+                        neighbors_visited++;
+                        s32 candidate_position = node_loop_positions[candidate_node].position;
+                        s32 candidate_cost = candidate.second;
 
-                            s32 succ_to_succ_cost = graph.get(i_succ, candidate_succ);
-                            s32 pred_to_pred_cost = graph.get(i_pred, candidate_pred);
+                        s32 candidate_pred = loop[(candidate_position-1 + loop_count) % loop_count];
+                        s32 candidate_succ = loop[(candidate_position+1) % loop_count];
+                        s32 candidate_pred_cost = graph.get(candidate_pred, candidate_node);
+                        s32 candidate_succ_cost = graph.get(candidate_node, candidate_succ);
 
-                            s32 succ_removal_delta = candidate_cost + succ_to_succ_cost - i_succ_cost - candidate_succ_cost;
-                            s32 pred_removal_delta = candidate_cost + pred_to_pred_cost - i_pred_cost - candidate_pred_cost;
+                        s32 succ_to_succ_cost = graph.get(i_succ, candidate_succ);
+                        s32 pred_to_pred_cost = graph.get(i_pred, candidate_pred);
 
-                            s32 delta;
-                            if (succ_removal_delta < pred_removal_delta) {
-                                should_remove_successor = true;
-                                delta = succ_removal_delta;
-                            } else {
-                                should_remove_successor = false;
-                                delta = pred_removal_delta;
-                            }
+                        s32 succ_removal_delta = candidate_cost + succ_to_succ_cost - i_succ_cost - candidate_succ_cost;
+                        s32 pred_removal_delta = candidate_cost + pred_to_pred_cost - i_pred_cost - candidate_pred_cost;
 
-                            if (delta < best.delta) {
-                                best.delta = delta;
-                                best.i = (i+offset) % loop_count;
-                                best.j = k;
-                                best_loop = &loop;
-                            }
+                        s32 delta = succ_removal_delta < pred_removal_delta ? succ_removal_delta : pred_removal_delta;
 
-                            break;
+                        if (delta < best.delta) {
+                            best.delta = delta;
+                            best.i = (i+offset) % loop_count;
+                            best.j = candidate_position;
+                            best_loop = &loop;
+                            should_remove_successor = delta == succ_removal_delta;
                         }
+                    
                         if (neighbors_visited == max_neighbours) {
                             break;
                         }
-                    }
-
+                    }           
                 }
             }
         }
@@ -1405,6 +1415,10 @@ Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 
                     for (s32 i = edge_i+1; i <= between; i++) {
                         s32 j = edge_j + edge_i+1 - i;
                         s32 t = loop[i];
+
+                        node_loop_positions[loop[i]].position = j;
+                        node_loop_positions[loop[j]].position = i;
+
                         loop[i] = loop[j];
                         loop[j] = t;
                     }
@@ -1412,15 +1426,25 @@ Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 
                     s32 loop_count = loop.size();
                     s32 between = ((edge_i-edge_j+loop_count) % loop_count)/2;
                     for (s32 i = 0; i < between; i++) {
-                        int loop_i = edge_j+i;
+                        int loop_i = (edge_j+i) % loop_count;
                         int j = (edge_i-1-i+loop_count) % loop_count;
                         s32 t = loop[loop_i];
+
+                        node_loop_positions[loop[loop_i]].position = j;
+                        node_loop_positions[loop[j]].position = loop_i;
+
                         loop[loop_i] = loop[j];
                         loop[j] = t;
                     }
                 }
             } else {
                 s32 t = result.loop_a[best.i];
+
+                node_loop_positions[t].loop=1;
+                node_loop_positions[t].position=best.j;
+                node_loop_positions[result.loop_b[best.j]].loop = 0;
+                node_loop_positions[result.loop_b[best.j]].position = best.i;
+
                 result.loop_a[best.i] = result.loop_b[best.j];
                 result.loop_b[best.j] = t;
             }
@@ -1440,6 +1464,8 @@ int main() {
     auto instance = parse_file("data/kroA200.tsp");
     auto init = greedy_loop(instance.graph);
 
+    printf("greedy loop score = %d\n", score(instance.graph, init));
+
     s32 start = stm_now();
     auto better_old = neighbour_search_edge(instance.graph, init, false);
     s32 old_time = stm_since(start);
@@ -1447,12 +1473,19 @@ int main() {
     printf("old time = %.3f ms\n", stm_ms(old_time));
 
     start = stm_now();
-    auto better = neighbour_search_edge_cache(instance.graph, init);
-    s32 new_time = stm_since(start);
-    printf("new implementation score = %d\n", score(instance.graph, better));
-    printf("new time = %.3f ms\n", stm_ms(new_time));
+    auto cache = neighbour_search_edge_cache(instance.graph, init);
+    s32 cache_time = stm_since(start);
+    printf("cache implementation score = %d\n", score(instance.graph, cache));
+    printf("cache time = %.3f ms\n", stm_ms(cache_time));
 
-    verify_solution(instance, better);
+    start = stm_now();
+    auto candidates = neighbour_search_edge_candidates(instance.graph, init, 2);
+    s32 candidates_time = stm_since(start);
+    printf("candidates implementation score = %d\n", score(instance.graph, candidates));
+    printf("candidates time = %.3f ms\n", stm_ms(candidates_time));
+
+
+    verify_solution(instance, candidates);
 
     return 0;
 }
