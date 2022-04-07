@@ -621,6 +621,44 @@ apply_change:
     return result;
 }
 
+enum ExchangeType {
+    EXCHANGE_LOOP_A  = 0,
+    EXCHANGE_LOOP_B  = 1,
+    EXCHANGE_LOOP_AB = 2,
+};
+
+struct Exchange {
+    s32 delta;
+    ExchangeType type;
+    union {
+        struct { // edge exchange
+            s32 i_from, i_to;
+            s32 j_from, j_to;
+        };
+        struct { // node exchange
+            s32 i_prev, i_curr, i_next;
+            s32 j_prev, j_curr, j_next;
+        };
+    };
+};
+
+bool operator <(const Exchange& lhs, const Exchange& rhs) {
+    return lhs.delta < rhs.delta;
+}
+
+void print_move(Exchange move) {
+    bool node_move = move.type == EXCHANGE_LOOP_AB;
+    printf("%s move:\t", node_move ? "node" : "edge");
+    printf("\tdelta = %d\t", move.delta);
+    if (node_move) {
+        printf("\ti = %d\t", move.i_curr);
+        printf("\tj = %d\n", move.j_curr);
+    } else {
+        printf("\ti = (%d; %d)\t", move.i_from, move.i_to);
+        printf("\tj = (%d; %d)\n", move.j_from, move.j_to);
+    }
+}
+
 Solution neighbour_search_edge(GraphMatrix graph, Solution init, bool greedy) {
     Solution result = init;
 
@@ -673,6 +711,18 @@ apply_change:
                 s32 edge_i = (best.i < best.j) ? best.i : best.j;
                 s32 edge_j = (best.i > best.j) ? best.i : best.j;
                 auto& loop = *best_loop;
+#if 0
+                {
+                    Exchange move;
+                    move.type = EXCHANGE_LOOP_A;
+                    move.i_from = loop[edge_i];
+                    move.i_to = loop[(edge_i+1+loop.size()) % loop.size()];
+                    move.j_from = loop[edge_j];
+                    move.j_to = loop[(edge_j+1+loop.size()) % loop.size()];
+                    move.delta = best.delta;
+                    print_move(move);
+                }
+#endif
                 s32 between = (edge_i+1 + edge_j) / 2;
                 for (s32 i = edge_i+1; i <= between; i++) {
                     s32 j = edge_j + edge_i+1 - i;
@@ -984,31 +1034,6 @@ Solution to_visit_list(SolutionList list) {
     return result;
 }
 
-enum ExchangeType {
-    EXCHANGE_LOOP_A  = 0,
-    EXCHANGE_LOOP_B  = 1,
-    EXCHANGE_LOOP_AB = 2,
-};
-
-struct Exchange {
-    s32 delta;
-    ExchangeType type;
-    union {
-        struct { // edge exchange
-            s32 i_from, i_to;
-            s32 j_from, j_to;
-        };
-        struct { // node exchange
-            s32 i_prev, i_curr, i_next;
-            s32 j_prev, j_curr, j_next;
-        };
-    };
-};
-
-bool operator <(const Exchange& lhs, const Exchange& rhs) {
-    return lhs.delta < rhs.delta;
-}
-
 inline s32 node_exchange_delta(GraphMatrix graph, Exchange move) {
     s32 new_i_next = (move.j_next != move.i_curr) ? move.j_next : move.j_curr;
     s32 new_j_next = (move.i_next != move.j_curr) ? move.i_next : move.i_curr;
@@ -1021,19 +1046,6 @@ inline s32 node_exchange_delta(GraphMatrix graph, Exchange move) {
     s32 new_j_cost = graph.get(move.i_curr, move.j_prev) +
                      graph.get(move.i_curr, new_i_next);
     return new_i_cost + new_j_cost - i_cost - j_cost;
-}
-
-void print_move(Exchange move) {
-    bool node_move = move.type == EXCHANGE_LOOP_AB;
-    printf("%s move:\n", node_move ? "node" : "edge");
-    printf("\tdelta = %d\n", move.delta);
-    if (node_move) {
-        printf("\ti = %d\n", move.i_curr);
-        printf("\tj = %d\n", move.j_curr);
-    } else {
-        printf("\ti = (%d; %d)\n", move.i_from, move.i_to);
-        printf("\tj = (%d; %d)\n", move.j_from, move.j_to);
-    }
 }
 
 void print_loops(SolutionList& list) {
@@ -1080,6 +1092,15 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
                 s32 j_cost = graph.get(move.j_from, move.j_to);
                 s32 new_i_cost = graph.get(move.j_from, move.i_from);
                 s32 new_j_cost = graph.get(move.j_to, move.i_to);
+                move.delta = new_i_cost + new_j_cost - i_cost - j_cost;
+                if (move.delta < 0) moves.insert(move);
+
+                // second orientation
+                s32 t = move.j_from;
+                move.j_from = move.j_to;
+                move.j_to = t;
+                new_i_cost = graph.get(move.j_from, move.i_from);
+                new_j_cost = graph.get(move.j_to, move.i_to);
                 move.delta = new_i_cost + new_j_cost - i_cost - j_cost;
                 if (move.delta < 0) moves.insert(move);
             }
@@ -1141,6 +1162,7 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
 
                     // if we got here, the move is applicable
 
+                    //print_move(move);
                     //printf("i, j correct = (%d, %d)\n", i_correct, j_correct);
                     if (i_reverse) {
                         s32 t = move.i_to;
@@ -1261,7 +1283,9 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
             move.i_to = list[move.i_from].next;
             s32 i_cost = graph.get(move.i_from, move.i_to);
             move.j_from = move.i_to;
+            s32 iter = 0;
             while (move.j_from != move.i_from) {
+                if (iter++ > 1000) exit(0);
                 move.j_to = list[move.j_from].next;
                 s32 j_cost = graph.get(move.j_from, move.j_to);
                 s32 new_i_cost = graph.get(move.j_from, move.i_from);
@@ -1273,7 +1297,14 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
                     moves.insert(move);
                 }
 
+                // second orientation
+                s32 t = move.j_from;
                 move.j_from = move.j_to;
+                move.j_to = t;
+                new_i_cost = graph.get(move.j_from, move.i_from);
+                new_j_cost = graph.get(move.j_to, move.i_to);
+                move.delta = new_i_cost + new_j_cost - i_cost - j_cost;
+                if (move.delta < 0) moves.insert(move);
             }
         }
 
@@ -1432,9 +1463,7 @@ Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 
 }
 
 int main() {
-    //srand(time(0));
-    //srand(0); // new implementation better
-    srand(2); // new implementation worse
+    srand(time(0));
     stm_setup();
 
     auto instance = parse_file("data/kroA200.tsp");
