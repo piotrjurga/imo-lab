@@ -1340,6 +1340,46 @@ struct NodeLoopPosition {
     s32 position;
 };
 
+NodeExchange best_node_exchange_candidates(GraphMatrix graph, std::vector<s32>& loop_i, std::vector<s32>& loop_j, std::vector<std::pair<s32, s32>>& best_neighbours, std::vector<NodeLoopPosition>& node_loop_positions, s32 max_neighbours) {
+    NodeExchange result = {};
+    s32 loop_i_count = loop_i.size();
+    s32 loop_j_count = loop_j.size();
+    s32 offset_i = rand() % loop_i_count;
+    s32 offset_j = rand() % loop_j_count;
+    for (s32 i = 0; i < loop_i.size(); i++) {
+        s32 i_prev = loop_i[(i-1+loop_i_count+offset_i) % loop_i_count];
+        s32 i_curr = loop_i[(i+offset_i) % loop_i_count];
+        s32 i_next = loop_i[(i+1+offset_i) % loop_i_count];
+        s32 i_cost = graph.get(i_curr, i_prev) + graph.get(i_curr, i_next);
+
+        s32 neighbours_visited = 0;
+        for (s32 j = 1; j < graph.dim; j++) {
+            std::pair<s32, s32> candidate = best_neighbours[i_curr*graph.dim+j];
+            s32 j_curr = candidate.first;
+            if (node_loop_positions[j_curr].loop == 1) {
+                neighbours_visited++;
+                s32 j = node_loop_positions[j_curr].position;
+                s32 j_prev = loop_j[(j-1 + loop_j_count) % loop_j_count];
+                s32 j_next = loop_j[(j+1) % loop_j_count];
+                s32 j_cost = graph.get(j_curr, j_prev) + graph.get(j_curr, j_next);
+                s32 new_i_cost = graph.get(j_curr, i_prev) + graph.get(j_curr, i_next);
+                s32 new_j_cost = graph.get(i_curr, j_prev) + graph.get(i_curr, j_next);
+                s32 delta = new_i_cost + new_j_cost - i_cost - j_cost;
+                if (delta < result.delta) {
+                    result.delta = delta;
+                    result.i = (i+offset_i) % loop_i_count;
+                    result.j = (j+offset_j) % loop_j_count;
+                }
+            }
+            if (neighbours_visited==max_neighbours) {
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
 Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 max_neighbours) {
     Solution result = init;
 
@@ -1430,7 +1470,7 @@ Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 
             }
         }
 
-        best_cross_loop = best_node_exchange(graph, result.loop_a, result.loop_b, false); // should this also account for closest neighbours in another loop only?
+        best_cross_loop = best_node_exchange_candidates(graph, result.loop_a, result.loop_b, best_neighbours, node_loop_positions, max_neighbours);
         if (best_cross_loop.delta < best.delta) {
             best = best_cross_loop;
             best_loop = NULL;
