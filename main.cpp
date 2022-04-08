@@ -659,7 +659,7 @@ void print_move(Exchange move) {
     }
 }
 
-Solution neighbour_search_edge(GraphMatrix graph, Solution init, bool greedy) {
+Solution neighbour_search_edge(GraphMatrix graph, Solution init, bool greedy = false) {
     Solution result = init;
 
     std::vector<s32> *loops[2];
@@ -1526,35 +1526,86 @@ Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 
     return result;
 }
 
+ExperimentResult run_experiment_3(Instance instance, const char *method_name, const char *instance_name, s32 method_switch, s32 max_neighbours=10) {
+    Solution min_solution, max_solution;
+    ExperimentResult experiment_result = {
+        .min = INT32_MAX,
+        .max = INT32_MIN
+        };
+    s32 n = 100;
+    s32 total_score = 0;
+    u64 min_time = INT64_MAX;
+    u64 max_time = 0;
+    u64 total_time = 0;
+    
+    for (int i = 0; i < n; i++) {
+        u64 start = stm_now();
+        auto initial_solution = greedy_loop(instance.graph);
+        Solution solution;
+        switch(method_switch) {
+            case 0:
+                solution = neighbour_search_edge(instance.graph, initial_solution, false);
+                break;
+            case 1:
+                solution = neighbour_search_edge_cache(instance.graph, initial_solution);
+                break;
+            case 2:
+                solution = neighbour_search_edge_candidates(instance.graph, initial_solution, max_neighbours);  
+                break;
+        }
+        u64 elapsed = stm_since(start);
+        if (elapsed < min_time) min_time = elapsed;
+        if (elapsed > max_time) max_time = elapsed;
+        total_time += elapsed;
+        auto solution_score = score(instance.graph, solution);
+        total_score += solution_score;
+
+        if (solution_score < experiment_result.min) {
+            experiment_result.min = solution_score;
+            experiment_result.best_solution = solution;
+        }
+        else if (solution_score > experiment_result.max) {
+            experiment_result.max = solution_score;
+        }
+    }
+
+    experiment_result.average = total_score/(f64)n;
+    auto average_time = stm_ms(total_time)/(f64)n;
+
+    char result_filepath[128];
+    sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
+    write_entire_file(result_filepath, experiment_result.best_solution.loop_a);
+    sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
+    write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
+
+    verify_solution(instance, experiment_result.best_solution);
+    printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, stm_ms(min_time), stm_ms(max_time));
+
+    return experiment_result;
+}
+
+void ls_optimized_experiments() {
+    auto kroA200 = parse_file("data/kroA200.tsp");
+    write_entire_file("results/kroA200/pos.dat", kroA200.positions);
+    printf("running experiments for kroA200\n");
+    run_experiment_3(kroA200, "steepest", "kroA200", 0);
+    run_experiment_3(kroA200, "cache", "kroA200", 1);
+    run_experiment_3(kroA200, "candidate", "kroA200", 2, 5);
+
+    printf("\n");
+
+    auto kroB200 = parse_file("data/kroB200.tsp");
+    write_entire_file("results/kroB200/pos.dat", kroB200.positions);
+    printf("running experiments for kroB200\n");
+    run_experiment_3(kroB200, "steepest", "kroB200", 0);
+    run_experiment_3(kroB200, "cache", "kroB200", 1);
+    run_experiment_3(kroB200, "candidate", "kroB200", 2, 5);
+}
+
 int main() {
     srand(time(0));
     stm_setup();
 
-    auto instance = parse_file("data/kroA200.tsp");
-    auto init = greedy_loop(instance.graph);
-
-    printf("greedy loop score = %d\n", score(instance.graph, init));
-
-    s32 start = stm_now();
-    auto better_old = neighbour_search_edge(instance.graph, init, false);
-    s32 old_time = stm_since(start);
-    printf("old implementation score = %d\n", score(instance.graph, better_old));
-    printf("old time = %.3f ms\n", stm_ms(old_time));
-
-    start = stm_now();
-    auto cache = neighbour_search_edge_cache(instance.graph, init);
-    s32 cache_time = stm_since(start);
-    printf("cache implementation score = %d\n", score(instance.graph, cache));
-    printf("cache time = %.3f ms\n", stm_ms(cache_time));
-
-    start = stm_now();
-    auto candidates = neighbour_search_edge_candidates(instance.graph, init, 2);
-    s32 candidates_time = stm_since(start);
-    printf("candidates implementation score = %d\n", score(instance.graph, candidates));
-    printf("candidates time = %.3f ms\n", stm_ms(candidates_time));
-
-
-    verify_solution(instance, candidates);
-
+    ls_optimized_experiments();
     return 0;
 }
