@@ -449,57 +449,6 @@ struct ExperimentResult {
     f64 average;
 };
 
-ExperimentResult run_experiment(Instance instance, Solver solving_method, const char *method_name, const char *instance_name) {
-    Solution min_solution, max_solution;
-    ExperimentResult experiment_result = {
-        .min = INT32_MAX,
-        .max = INT32_MIN
-        };
-    s32 n = 100;
-    s32 total_score = 0;
-    for (int i = 0; i < n; i++) {
-        auto solution = solving_method(instance.graph);
-        auto solution_score = score(instance.graph, solution);
-        total_score += solution_score;
-
-        if (solution_score < experiment_result.min) {
-            experiment_result.min = solution_score;
-            experiment_result.best_solution = solution;
-        }
-        else if (solution_score > experiment_result.max) {
-            experiment_result.max = solution_score;
-        }
-    }
-    experiment_result.average = total_score/(f64)n;
-
-    char result_filepath[128];
-    sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
-    write_entire_file(result_filepath, experiment_result.best_solution.loop_a);
-    sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
-    write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
-
-    verify_solution(instance, experiment_result.best_solution);
-    printf("%s %s: %.2f (%d - %d)\n\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max);
-
-    return experiment_result;
-}
-
-void greedy_experiments() {
-    auto kroA100 = parse_file("data/kroA100.tsp");
-    write_entire_file("results/kroA100/pos.dat", kroA100.positions);
-
-    auto result1 = run_experiment(kroA100, greedy_simple, "greedy_simple", "kroA100");
-    auto result2 = run_experiment(kroA100, greedy_loop, "greedy_loop", "kroA100");
-    auto result3 = run_experiment(kroA100, regret_loop, "regret_loop", "kroA100");
-
-    auto kroB100 = parse_file("data/kroB100.tsp");
-    write_entire_file("results/kroB100/pos.dat", kroB100.positions);
-
-    auto result4 = run_experiment(kroB100, greedy_simple, "greedy_simple", "kroB100");
-    auto result5 = run_experiment(kroB100, greedy_loop, "greedy_loop", "kroB100");
-    auto result6 = run_experiment(kroB100, regret_loop, "regret_loop", "kroB100");
-}
-
 struct NodeExchange {
     s32 delta, i, j;
 };
@@ -834,132 +783,6 @@ Solution random_walk(GraphMatrix graph, Solution init, s32 steps) {
 }
 
 typedef Solution (*LS_Solver)(GraphMatrix graph, Solution init, bool greedy);
-
-ExperimentResult run_experiment_2(Instance instance, bool use_random_solution, LS_Solver local_search_method, const char *method_name, const char *instance_name, bool greedy) {
-    Solution min_solution, max_solution;
-    ExperimentResult experiment_result = {
-        .min = INT32_MAX,
-        .max = INT32_MIN
-        };
-    s32 n = 100;
-    s32 total_score = 0;
-    u64 min_time = INT64_MAX;
-    u64 max_time = 0;
-    u64 total_time = 0;
-    
-    for (int i = 0; i < n; i++) {
-        u64 start = stm_now();
-        auto initial_solution = use_random_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
-        auto solution =  local_search_method(instance.graph, initial_solution, greedy);
-        u64 elapsed = stm_since(start);
-        if (elapsed < min_time) min_time = elapsed;
-        if (elapsed > max_time) max_time = elapsed;
-        total_time += elapsed;
-        auto solution_score = score(instance.graph, solution);
-        total_score += solution_score;
-
-        if (solution_score < experiment_result.min) {
-            experiment_result.min = solution_score;
-            experiment_result.best_solution = solution;
-        }
-        else if (solution_score > experiment_result.max) {
-            experiment_result.max = solution_score;
-        }
-    }
-
-    experiment_result.average = total_score/(f64)n;
-    auto average_time = stm_ms(total_time)/(f64)n;
-
-    char result_filepath[128];
-    sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
-    write_entire_file(result_filepath, experiment_result.best_solution.loop_a);
-    sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
-    write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
-
-    verify_solution(instance, experiment_result.best_solution);
-    printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, stm_ms(min_time), stm_ms(max_time));
-
-
-    return experiment_result;
-}
-
-ExperimentResult run_random_walk_experiment_2(Instance instance, bool use_random_solution, const char *method_name, const char *instance_name, s32 steps) {
-    Solution min_solution, max_solution;
-    ExperimentResult experiment_result = {
-        .min = INT32_MAX,
-        .max = INT32_MIN
-        };
-    s32 n = 100;
-    s32 total_score = 0;
-    u64 min_time = UINT64_MAX;
-    u64 max_time = 0;
-    u64 total_time = 0;
-    
-    for (int i = 0; i < n; i++) {
-        u64 start = stm_now();
-        auto initial_solution = use_random_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
-        auto solution =  random_walk(instance.graph, initial_solution, steps);
-        u64 elapsed = stm_since(start);
-        if (elapsed < min_time) min_time = elapsed;
-        if (elapsed > max_time) max_time = elapsed;
-        total_time += elapsed;
-        auto solution_score = score(instance.graph, solution);
-        total_score += solution_score;
-
-        if (solution_score < experiment_result.min) {
-            experiment_result.min = solution_score;
-            experiment_result.best_solution = solution;
-        }
-        else if (solution_score > experiment_result.max) {
-            experiment_result.max = solution_score;
-        }
-    }
-    experiment_result.average = total_score/(f64)n;
-    f64 average_time = stm_ms(total_time)/(f64)n;
-
-    char result_filepath[128];
-    sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
-    write_entire_file(result_filepath, experiment_result.best_solution.loop_a);
-    sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
-    write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
-
-    verify_solution(instance, experiment_result.best_solution);
-    printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, stm_ms(min_time), stm_ms(max_time));
-
-    return experiment_result;
-}
-
-void run_experiment_2_for_instance(Instance instance, const char *instance_name) {
-    auto random_sol = random_solution(instance.graph.dim);
-    auto greedy_loop_sol = greedy_loop(instance.graph);
-
-    // losowe rozwiązanie
-    run_random_walk_experiment_2(instance, true, "random_loop-random_walk", instance_name, 185000);
-    run_experiment_2(instance, true, neighbour_search_node, "random_loop-greedy-neighbour_search_node", instance_name, true);
-    run_experiment_2(instance, true, neighbour_search_edge, "random_loop-greedy-neighbour_search_edge", instance_name, true);
-    run_experiment_2(instance, true, neighbour_search_node, "random_loop-best-neighbour_search_node", instance_name, false);
-    run_experiment_2(instance, true, neighbour_search_edge, "random_loop-best-neighbour_search_edge", instance_name, false);
-
-    // rozbudowa cyklu
-    run_random_walk_experiment_2(instance, false, "greedy_loop-random_walk", instance_name, 185000);
-    run_experiment_2(instance, false, neighbour_search_node, "greedy_loop-greedy-neighbour_search_node", instance_name, true);
-    run_experiment_2(instance, false, neighbour_search_edge, "greedy_loop-greedy-neighbour_search_edge", instance_name, true);
-    run_experiment_2(instance, false, neighbour_search_node, "greedy_loop-best-neighbour_search_node", instance_name, false);
-    run_experiment_2(instance, false, neighbour_search_edge, "greedy_loop-best-neighbour_search_edge", instance_name, false);
-}
-
-void local_search_experiments() {
-    auto kroA100 = parse_file("data/kroA100.tsp");
-    write_entire_file("results/kroA100/pos.dat", kroA100.positions);
-    printf("running experiments for kroA100\n");
-    run_experiment_2_for_instance(kroA100, "kroA100");
-
-
-    auto kroB100 = parse_file("data/kroB100.tsp");
-    write_entire_file("results/kroB100/pos.dat", kroB100.positions);
-    printf("running experiments for kroB100\n");
-    run_experiment_2_for_instance(kroB100, "kroB100");
-}
 
 struct Node {
     s32 next;
@@ -1353,8 +1176,8 @@ NodeExchange best_node_exchange_candidates(GraphMatrix graph, std::vector<s32>& 
         s32 i_cost = graph.get(i_curr, i_prev) + graph.get(i_curr, i_next);
 
         s32 neighbours_visited = 0;
-        for (s32 j = 1; j < graph.dim; j++) {
-            std::pair<s32, s32> candidate = best_neighbours[i_curr*graph.dim+j];
+        for (s32 k = 1; k < graph.dim; k++) {
+            std::pair<s32, s32> candidate = best_neighbours[i_curr*graph.dim+k];
             s32 j_curr = candidate.first;
             if (node_loop_positions[j_curr].loop == 1) {
                 neighbours_visited++;
@@ -1368,7 +1191,7 @@ NodeExchange best_node_exchange_candidates(GraphMatrix graph, std::vector<s32>& 
                 if (delta < result.delta) {
                     result.delta = delta;
                     result.i = (i+offset_i) % loop_i_count;
-                    result.j = (j+offset_j) % loop_j_count;
+                    result.j = j;
                 }
             }
             if (neighbours_visited==max_neighbours) {
@@ -1387,7 +1210,6 @@ Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 
     loops[0] = &result.loop_a;
     loops[1] = &result.loop_b;
 
-    // std::vector<std::vector<std::pair<s32, s32>>> best_neighbours(graph.dim);
     std::vector<NodeLoopPosition> node_loop_positions(graph.dim);
 
     for (s32 loop_i = 0; loop_i < 2; loop_i++) {
@@ -1437,33 +1259,34 @@ Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 
                     std::pair<s32, s32> candidate = best_neighbours[i_node*graph.dim+j];
                     s32 candidate_node = candidate.first;
                     if (node_loop_positions[candidate_node].loop == (loop_i + loop_offset) & 1) {
-                        neighbors_visited++;
                         s32 candidate_position = node_loop_positions[candidate_node].position;
-                        s32 candidate_cost = candidate.second;
-
                         s32 candidate_pred = loop[(candidate_position-1 + loop_count) % loop_count];
                         s32 candidate_succ = loop[(candidate_position+1) % loop_count];
-                        s32 candidate_pred_cost = graph.get(candidate_pred, candidate_node);
-                        s32 candidate_succ_cost = graph.get(candidate_node, candidate_succ);
+                        if (candidate_pred != i_node && candidate_succ != i_node) {
+                            neighbors_visited++;
+                            s32 candidate_pred_cost = graph.get(candidate_pred, candidate_node);
+                            s32 candidate_succ_cost = graph.get(candidate_node, candidate_succ);
+                            s32 candidate_cost = candidate.second;
 
-                        s32 succ_to_succ_cost = graph.get(i_succ, candidate_succ);
-                        s32 pred_to_pred_cost = graph.get(i_pred, candidate_pred);
+                            s32 succ_to_succ_cost = graph.get(i_succ, candidate_succ);
+                            s32 pred_to_pred_cost = graph.get(i_pred, candidate_pred);
 
-                        s32 succ_removal_delta = candidate_cost + succ_to_succ_cost - i_succ_cost - candidate_succ_cost;
-                        s32 pred_removal_delta = candidate_cost + pred_to_pred_cost - i_pred_cost - candidate_pred_cost;
+                            s32 succ_removal_delta = candidate_cost + succ_to_succ_cost - i_succ_cost - candidate_succ_cost;
+                            s32 pred_removal_delta = candidate_cost + pred_to_pred_cost - i_pred_cost - candidate_pred_cost;
 
-                        s32 delta = succ_removal_delta < pred_removal_delta ? succ_removal_delta : pred_removal_delta;
+                            s32 delta = succ_removal_delta < pred_removal_delta ? succ_removal_delta : pred_removal_delta;
 
-                        if (delta < best.delta) {
-                            best.delta = delta;
-                            best.i = (i+offset) % loop_count;
-                            best.j = candidate_position;
-                            best_loop = &loop;
-                            should_remove_successor = delta == succ_removal_delta;
-                        }
-                    
-                        if (neighbors_visited == max_neighbours) {
-                            break;
+                            if (delta < best.delta) {
+                                best.delta = delta;
+                                best.i = (i+offset) % loop_count;
+                                best.j = candidate_position;
+                                best_loop = &loop;
+                                should_remove_successor = delta == succ_removal_delta;
+                            }
+                        
+                            if (neighbors_visited == max_neighbours) {
+                                break;
+                            }
                         }
                     }           
                 }
