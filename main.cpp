@@ -1108,7 +1108,9 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
             move.j_from = move.i_to;
             s32 iter = 0;
             while (move.j_from != move.i_from) {
-                if (iter++ > 1000) exit(0);
+                if (iter++ > 1000) {
+                    return Solution();
+                };
                 move.j_to = list[move.j_from].next;
                 s32 j_cost = graph.get(move.j_from, move.j_to);
                 s32 new_i_cost = graph.get(move.j_from, move.i_from);
@@ -1349,7 +1351,7 @@ Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 
     return result;
 }
 
-ExperimentResult run_experiment_3(Instance instance, const char *method_name, const char *instance_name, s32 method_switch, s32 max_neighbours=10) {
+ExperimentResult run_experiment(Instance instance, const char *method_name, const char *instance_name, s32 method_switch, s32 max_neighbours=10) {
     Solution min_solution, max_solution;
     ExperimentResult experiment_result = {
         .min = INT32_MAX,
@@ -1362,17 +1364,27 @@ ExperimentResult run_experiment_3(Instance instance, const char *method_name, co
     u64 total_time = 0;
     
     for (int i = 0; i < n; i++) {
-        u64 start = stm_now();
-        auto initial_solution = greedy_loop(instance.graph);
         Solution solution;
+        Solution initial_solution;
+        u64 start = stm_now();
         switch(method_switch) {
             case 0:
-                solution = neighbour_search_edge(instance.graph, initial_solution, false);
+                solution = greedy_loop(instance.graph);
                 break;
             case 1:
-                solution = neighbour_search_edge_cache(instance.graph, initial_solution);
+                initial_solution = random_solution(instance.graph.dim);
+                solution = neighbour_search_edge(instance.graph, initial_solution, false);
                 break;
             case 2:
+                initial_solution = random_solution(instance.graph.dim);
+                solution = neighbour_search_edge_cache(instance.graph, initial_solution);
+                if (solution.loop_a.size()==0) {
+                    i--;
+                    continue;
+                }
+                break;
+            case 3:
+                initial_solution = random_solution(instance.graph.dim);
                 solution = neighbour_search_edge_candidates(instance.graph, initial_solution, max_neighbours);  
                 break;
         }
@@ -1395,11 +1407,9 @@ ExperimentResult run_experiment_3(Instance instance, const char *method_name, co
     experiment_result.average = total_score/(f64)n;
     auto average_time = stm_ms(total_time)/(f64)n;
 
-    char result_filepath[128];
-    sprintf(result_filepath, "results/%s/%s-a.dat", instance_name, method_name);
-    write_entire_file(result_filepath, experiment_result.best_solution.loop_a);
-    sprintf(result_filepath, "results/%s/%s-b.dat", instance_name, method_name);
-    write_entire_file(result_filepath, experiment_result.best_solution.loop_b);
+    std::string result_filepath = "results/"+std::string(instance_name)+"/"+std::string(method_name);
+    write_entire_file((result_filepath+"-a.dat").c_str(), experiment_result.best_solution.loop_a);
+    write_entire_file((result_filepath+"-b.dat").c_str(), experiment_result.best_solution.loop_b);
 
     verify_solution(instance, experiment_result.best_solution);
     printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, stm_ms(min_time), stm_ms(max_time));
@@ -1407,26 +1417,26 @@ ExperimentResult run_experiment_3(Instance instance, const char *method_name, co
     return experiment_result;
 }
 
-void ls_optimized_experiments() {
-    auto kroA200 = parse_file("data/kroA200.tsp");
-    write_entire_file("results/kroA200/pos.dat", kroA200.positions);
-    printf("running experiments for kroA200\n");
-    run_experiment_3(kroA200, "steepest", "kroA200", 0);
-    run_experiment_3(kroA200, "cache", "kroA200", 1);
-    run_experiment_3(kroA200, "candidate", "kroA200", 2, 5);
-
-    printf("\n");
-
-    auto kroB200 = parse_file("data/kroB200.tsp");
-    write_entire_file("results/kroB200/pos.dat", kroB200.positions);
-    printf("running experiments for kroB200\n");
-    run_experiment_3(kroB200, "steepest", "kroB200", 0);
-    run_experiment_3(kroB200, "cache", "kroB200", 1);
-    run_experiment_3(kroB200, "candidate", "kroB200", 2, 5);
+void run_experiment_for_instance(std::string instance_name) {
+    auto instance = parse_file(("data/" + instance_name + ".tsp").c_str());
+    write_entire_file(("results/" + instance_name + "/pos.dat").c_str(), instance.positions);
+    printf("running experiments for %s\n", instance_name.c_str());
+    run_experiment(instance, "greedyloop", instance_name.c_str(), 0);
+    run_experiment(instance, "steepest", instance_name.c_str(), 1);
+    run_experiment(instance, "cache", instance_name.c_str(), 2);
+    run_experiment(instance, "candidate", instance_name.c_str(), 3, 10);
 }
 
-int main() {
+void ls_optimized_experiments() {
+    run_experiment_for_instance("kroA200");
+    printf("\n");
+    run_experiment_for_instance("kroB200");
+}
+
+int main(int argc, char *argv[]) {
     srand(time(0));
+    // srand(std::atoi(argv[1]));
+    srand(1);
     stm_setup();
 
     ls_optimized_experiments();
