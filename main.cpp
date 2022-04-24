@@ -984,6 +984,12 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
             switch (move.type) {
                 case EXCHANGE_LOOP_A:
                 case EXCHANGE_LOOP_B: {
+                    bool same_loop = list.loop[move.i_from] == list.loop[move.j_from];
+                    if (!same_loop) {
+                        do_remove = true;
+                        break;
+                    }
+
                     bool i_correct = list[move.i_from].next == move.i_to;
                     bool i_reverse = list[move.i_from].prev == move.i_to;
                     bool j_correct = list[move.j_from].next == move.j_to;
@@ -1121,11 +1127,7 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
             move.i_to = list[move.i_from].next;
             s32 i_cost = graph.get(move.i_from, move.i_to);
             move.j_from = move.i_to;
-            s32 iter = 0;
             while (move.j_from != move.i_from) {
-                if (iter++ > 1000) {
-                    return to_visit_list(list); // todo fix bug
-                };
                 move.j_to = list[move.j_from].next;
                 s32 j_cost = graph.get(move.j_from, move.j_to);
                 s32 new_i_cost = graph.get(move.j_from, move.i_from);
