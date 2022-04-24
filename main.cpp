@@ -211,7 +211,7 @@ s32 best_intermediate_node(GraphMatrix graph, s32 a, s32 b, std::vector<s32>& av
     return best;
 }
 
-Solution greedy_loop(GraphMatrix graph) {
+Solution greedy_loop(GraphMatrix graph, Solution *initial_solution = NULL) {
     Solution result;
     auto& a = result.loop_a;
     auto& b = result.loop_b;
@@ -224,14 +224,29 @@ Solution greedy_loop(GraphMatrix graph) {
         available[i] = i;
     }
 
-    s32 loop_a_first = rand() % graph.dim;
-    s32 first_node_idx = available[loop_a_first];
-    a.push_back(first_node_idx);
-    vector_remove_idx(available, loop_a_first);
-    a.push_back(consume_closest(graph, first_node_idx, available));
+    if (initial_solution == NULL) {
+        s32 loop_a_first = rand() % graph.dim;
+        s32 first_node_idx = available[loop_a_first];
+        a.push_back(first_node_idx);
+        vector_remove_idx(available, loop_a_first);
+        a.push_back(consume_closest(graph, first_node_idx, available));
 
-    b.push_back(consume_furthest(graph, first_node_idx, available));
-    b.push_back(consume_closest(graph, b[0], available));
+        b.push_back(consume_furthest(graph, first_node_idx, available));
+        b.push_back(consume_closest(graph, b[0], available));
+    } else {
+        a = initial_solution->loop_a;
+        b = initial_solution->loop_b;
+
+        for (s32 i = 0; i < a.size(); i++) {
+            auto pos = std::find(available.begin(), available.end(), a[i]);
+            if (pos != available.end()) available.erase(pos);
+        }
+
+        for (s32 i = 0; i < b.size(); i++) {
+            auto pos = std::find(available.begin(), available.end(), b[i]);
+            if (pos != available.end()) available.erase(pos);
+        }
+    }
 
     while (available.size() > 0) {
         s32 best_a = 0;
@@ -1109,7 +1124,7 @@ Solution neighbour_search_edge_cache(GraphMatrix graph, Solution init) {
             s32 iter = 0;
             while (move.j_from != move.i_from) {
                 if (iter++ > 1000) {
-                    return Solution();
+                    return to_visit_list(list); // todo fix bug
                 };
                 move.j_to = list[move.j_from].next;
                 s32 j_cost = graph.get(move.j_from, move.j_to);
@@ -1351,7 +1366,22 @@ Solution neighbour_search_edge_candidates(GraphMatrix graph, Solution init, s32 
     return result;
 }
 
-Solution ils1(GraphMatrix graph, Solution init, s32 timelimit, s32 node_switch, s32 edge_switch) {
+Solution msls(GraphMatrix graph, s32 iterations) {
+    auto best_score = INT32_MAX;
+    Solution ls, best_solution;
+    for (s32 i = 0; i < iterations; i++) {
+        auto init = greedy_loop(graph);
+        ls = neighbour_search_edge_cache(graph, init);
+        auto new_score = score(graph, ls);
+        if (new_score < best_score) {
+            best_score = new_score;
+            best_solution = ls;
+        }
+    }
+    return best_solution;
+}
+
+Solution ils1(GraphMatrix graph, Solution init, s32 time_limit, s32 node_switch, s32 edge_switch) {
     auto current_solution = init;
 
     std::vector<s32> *loops[2];
@@ -1362,7 +1392,7 @@ Solution ils1(GraphMatrix graph, Solution init, s32 timelimit, s32 node_switch, 
     auto best_score = score(graph, init);
     
     u64 start = stm_now();
-    while (stm_ms(stm_since(start)) < timelimit) {
+    while (stm_ms(stm_since(start)) < time_limit) {
         for (s32 i = 0; i < edge_switch; i++) {
                 // switch two edges from a random loop
                 auto& loop = *loops[rand()&1];
@@ -1406,41 +1436,67 @@ Solution ils1(GraphMatrix graph, Solution init, s32 timelimit, s32 node_switch, 
     return best_solution;
 }
 
-ExperimentResult run_experiment(Instance instance, const char *method_name, const char *instance_name, s32 method_switch, s32 max_neighbours=10) {
+Solution ils2(GraphMatrix graph, Solution init, bool local_search, s32 time_limit, s32 remove_nodes_percentage) {
+    auto current_solution = init;
+
+    std::vector<s32> *loops[2];
+    loops[0] = &current_solution.loop_a;
+    loops[1] = &current_solution.loop_b;
+
+    Solution best_solution = init;
+    auto best_score = score(graph, init);
+    s32 nodes_to_remove = remove_nodes_percentage*graph.dim/100;
+    
+    u64 start = stm_now();
+    while (stm_ms(stm_since(start)) < time_limit) {
+        for (s32 i = 0; i < nodes_to_remove; i++) {
+            auto& loop = *loops[rand()&1];
+            vector_remove_idx(loop, rand() % loop.size());
+        }
+
+        current_solution = greedy_loop(graph, &current_solution);
+        if (local_search) {
+            current_solution = neighbour_search_edge_cache(graph, current_solution);
+        }
+        
+        auto new_score = score(graph, current_solution);
+        if (new_score < best_score) {
+            best_score = new_score;
+            best_solution = current_solution;
+        }
+    }
+    return best_solution;
+}
+
+ExperimentResult run_experiment(Instance instance, const char *method_name, const char *instance_name, bool random_initial_solution, s32 method_switch) {
     Solution min_solution, max_solution;
     ExperimentResult experiment_result = {
         .min = INT32_MAX,
         .max = INT32_MIN
         };
-    s32 n = 100;
+    s32 n = 10;
     s32 total_score = 0;
     u64 min_time = INT64_MAX;
     u64 max_time = 0;
     u64 total_time = 0;
     
     for (int i = 0; i < n; i++) {
-        Solution solution;
-        Solution initial_solution;
+        Solution solution, initial_solution;
         u64 start = stm_now();
         switch(method_switch) {
             case 0:
-                solution = greedy_loop(instance.graph);
-                break;
+                solution = msls(instance.graph, 100);
             case 1:
-                initial_solution = random_solution(instance.graph.dim);
-                solution = neighbour_search_edge(instance.graph, initial_solution, false);
+                initial_solution = random_initial_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
+                solution = ils1(instance.graph, initial_solution, 3400, 0, 2);
                 break;
             case 2:
-                initial_solution = random_solution(instance.graph.dim);
-                solution = neighbour_search_edge_cache(instance.graph, initial_solution);
-                if (solution.loop_a.size()==0) {
-                    i--;
-                    continue;
-                }
+                initial_solution = random_initial_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
+                solution = ils2(instance.graph, initial_solution, false, 3400, 20);
                 break;
             case 3:
-                initial_solution = random_solution(instance.graph.dim);
-                solution = neighbour_search_edge_candidates(instance.graph, initial_solution, max_neighbours);  
+                initial_solution = random_initial_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
+                solution = ils2(instance.graph, initial_solution, true, 3400, 20);
                 break;
         }
         u64 elapsed = stm_since(start);
@@ -1476,13 +1532,13 @@ void run_experiment_for_instance(std::string instance_name) {
     auto instance = parse_file(("data/" + instance_name + ".tsp").c_str());
     write_entire_file(("results/" + instance_name + "/pos.dat").c_str(), instance.positions);
     printf("running experiments for %s\n", instance_name.c_str());
-    run_experiment(instance, "greedyloop", instance_name.c_str(), 0);
-    run_experiment(instance, "steepest", instance_name.c_str(), 1);
-    run_experiment(instance, "cache", instance_name.c_str(), 2);
-    run_experiment(instance, "candidate", instance_name.c_str(), 3, 10);
+    run_experiment(instance, "msls", instance_name.c_str(), false, 0);
+    run_experiment(instance, "ils1", instance_name.c_str(), false, 1);
+    run_experiment(instance, "ils2", instance_name.c_str(), false, 2);
+    run_experiment(instance, "ils2a", instance_name.c_str(), false, 3);
 }
 
-void ls_optimized_experiments() {
+void run() {
     run_experiment_for_instance("kroA200");
     printf("\n");
     run_experiment_for_instance("kroB200");
@@ -1494,14 +1550,8 @@ int main(int argc, char *argv[]) {
     srand(1);
     stm_setup();
 
-    auto instance = parse_file("data/kroA200.tsp");
-    write_entire_file("results/pos.dat", instance.positions);
-
-    Solution initial_solution = greedy_loop(instance.graph);
-    Solution ils1_solution = ils1(instance.graph, initial_solution, 2000, 0, 2);
-
-    printf("initial_solution: %d\n", score(instance.graph, initial_solution));
-    printf("ils1 solution: %d\n", score(instance.graph, ils1_solution));
+    run_experiment_for_instance("kroA200");
+    run_experiment_for_instance("kroB200");
 
     return 0;
 }
