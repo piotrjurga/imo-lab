@@ -23,20 +23,15 @@ if 1:
     plt.show()
     exit()
 
-instances = ["kroA100", "kroB100"]
-methods = ["greedy_simple", "greedy_loop", "regret_loop"]
-initial_solutions = ["random_loop", "greedy_loop"]
-methods = ["random_walk", "greedy-neighbour_search_node", "greedy-neighbour_search_edge", "best-neighbour_search_node", "best-neighbour_search_edge"]
-
-solutions = list(itertools.product([initial_solutions[0]], methods)) + list(itertools.product([initial_solutions[1]], methods))
+instances = ["kroA200", "kroB200"]
+methods = ["msls", "ils1", "ils2", "ils2a"]
 
 for instance in instances:
     pos = np.fromfile(f'results/{instance}/pos.dat', dtype=np.int32)
     pos = pos.reshape([-1, 2])
-    for solution in solutions:
-        solution = "-".join(list(solution))
-        a = np.fromfile(f'results/{instance}/{solution}-a.dat', dtype=np.int32)
-        b = np.fromfile(f'results/{instance}/{solution}-b.dat', dtype=np.int32)
+    for method in methods:
+        a = np.fromfile(f'results/{instance}/{method}-a.dat', dtype=np.int32)
+        b = np.fromfile(f'results/{instance}/{method}-b.dat', dtype=np.int32)
 
         pa = pos[a]
         pb = pos[b]
@@ -50,6 +45,8 @@ for instance in instances:
         plt.scatter(xb, yb)
         ax = plt.gca()
         ax.axis('off')
-        plt.savefig(f'results/{instance}-{solution}', dpi=300, pad_inches=0, bbox_inches='tight')        
+        plt.savefig(f'results/{instance}-{method}', dpi=300, pad_inches=0, bbox_inches='tight')        
         plt.show()
         plt.clf()
+
+# %%

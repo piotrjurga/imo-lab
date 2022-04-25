@@ -462,6 +462,7 @@ struct ExperimentResult {
     Solution best_solution;
     s32 min, max;
     f64 average;
+    f64 average_time;
 };
 
 struct NodeExchange {
@@ -1423,11 +1424,7 @@ Solution ils1(GraphMatrix graph, Solution init, s32 time_limit, s32 node_switch,
                 current_solution.loop_b[node_j] = t;
         }
 
-        Solution lssolution;
-        do {
-            lssolution = neighbour_search_edge_cache(graph, current_solution);
-        } while (lssolution.loop_a.size() == 0); // skip potential bugs
-        current_solution = lssolution;
+        current_solution = neighbour_search_edge_cache(graph, current_solution);
         
         auto new_score = score(graph, current_solution);
         if (new_score < best_score) {
@@ -1470,7 +1467,7 @@ Solution ils2(GraphMatrix graph, Solution init, bool local_search, s32 time_limi
     return best_solution;
 }
 
-ExperimentResult run_experiment(Instance instance, const char *method_name, const char *instance_name, bool random_initial_solution, s32 method_switch) {
+ExperimentResult run_experiment(Instance instance, const char *method_name, const char *instance_name, bool random_initial_solution, s32 time_limit, s32 method_switch, s32 node_switch=1, s32 edge_switch=5, s32 percentage=20) {
     Solution min_solution, max_solution;
     ExperimentResult experiment_result = {
         .min = INT32_MAX,
@@ -1490,15 +1487,15 @@ ExperimentResult run_experiment(Instance instance, const char *method_name, cons
                 solution = msls(instance.graph, 100);
             case 1:
                 initial_solution = random_initial_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
-                solution = ils1(instance.graph, initial_solution, 3400, 0, 2);
+                solution = ils1(instance.graph, initial_solution, time_limit, node_switch, edge_switch);
                 break;
             case 2:
                 initial_solution = random_initial_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
-                solution = ils2(instance.graph, initial_solution, false, 3400, 20);
+                solution = ils2(instance.graph, initial_solution, true, time_limit, percentage);
                 break;
             case 3:
                 initial_solution = random_initial_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
-                solution = ils2(instance.graph, initial_solution, true, 3400, 20);
+                solution = ils2(instance.graph, initial_solution, false, time_limit, percentage);
                 break;
         }
         u64 elapsed = stm_since(start);
@@ -1512,13 +1509,14 @@ ExperimentResult run_experiment(Instance instance, const char *method_name, cons
             experiment_result.min = solution_score;
             experiment_result.best_solution = solution;
         }
-        else if (solution_score > experiment_result.max) {
+        if (solution_score > experiment_result.max) {
             experiment_result.max = solution_score;
         }
     }
 
     experiment_result.average = total_score/(f64)n;
     auto average_time = stm_ms(total_time)/(f64)n;
+    experiment_result.average_time = average_time;
 
     std::string result_filepath = "results/"+std::string(instance_name)+"/"+std::string(method_name);
     write_entire_file((result_filepath+"-a.dat").c_str(), experiment_result.best_solution.loop_a);
@@ -1534,20 +1532,14 @@ void run_experiment_for_instance(std::string instance_name) {
     auto instance = parse_file(("data/" + instance_name + ".tsp").c_str());
     write_entire_file(("results/" + instance_name + "/pos.dat").c_str(), instance.positions);
     printf("running experiments for %s\n", instance_name.c_str());
-    run_experiment(instance, "msls", instance_name.c_str(), false, 0);
-    run_experiment(instance, "ils1", instance_name.c_str(), false, 1);
-    run_experiment(instance, "ils2", instance_name.c_str(), false, 2);
-    run_experiment(instance, "ils2a", instance_name.c_str(), false, 3);
-}
-
-void run() {
-    run_experiment_for_instance("kroA200");
-    printf("\n");
-    run_experiment_for_instance("kroB200");
+    auto time_limit = run_experiment(instance, "msls", instance_name.c_str(), false, 0, 0).average_time - 20;
+    run_experiment(instance, "ils1", instance_name.c_str(), false, time_limit, 1);
+    run_experiment(instance, "ils2", instance_name.c_str(), false, time_limit, 2);
+    run_experiment(instance, "ils2a", instance_name.c_str(), false, time_limit, 3);
 }
 
 int main(int argc, char *argv[]) {
-    srand(time(0));
+    // srand(time(0));
     // srand(std::atoi(argv[1]));
     srand(1);
     stm_setup();
