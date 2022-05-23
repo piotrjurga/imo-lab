@@ -1486,12 +1486,13 @@ Solution ils2(GraphMatrix graph, Solution init, bool local_search, s32 time_limi
     return best_solution;
 }
 
-Solution evolve(GraphMatrix graph, s32 max_iters) {
+Solution evolve(GraphMatrix graph, s32 time_limit, bool ls) {
     constexpr s32 population_count = 20;
     SolutionList elite[population_count];
     s32 scores[population_count];
     std::unordered_set<s32> score_set(population_count);
 
+    u64 timestart = stm_now();
     s32 added = 0;
     while (added < population_count) {
         auto init = greedy_loop(graph);
@@ -1503,7 +1504,7 @@ Solution evolve(GraphMatrix graph, s32 max_iters) {
         if (inserted) added++;
     }
 
-    for (s32 iter = 0; iter < max_iters; iter++) {
+    while (stm_ms(stm_since(timestart)) < time_limit) {
         s32 parent_a = rand() % population_count;
         s32 parent_b = rand() % (population_count-1);
         parent_b += (parent_b == parent_a);
@@ -1554,7 +1555,7 @@ Solution evolve(GraphMatrix graph, s32 max_iters) {
         auto fixed = greedy_loop(graph, &visit_list);
         s32 new_score = score(graph, fixed);
         child = to_linked_list(fixed);
-        //new_score += neighbour_search_edge_cache(graph, child);
+        if (ls) new_score += neighbour_search_edge_cache(graph, child);
         auto [_, inserted] = score_set.insert(new_score);
         if (inserted) {
             s32 worst = 0;
@@ -1607,7 +1608,11 @@ ExperimentResult run_experiment(Instance instance, const char *method_name, cons
                 solution = ils2(instance.graph, initial_solution, false, time_limit, percentage);
                 break;
             case 4:
-                solution = evolve(instance.graph, 100);
+            // 282.54
+                solution = evolve(instance.graph, 282, false);
+                break;
+            case 5:
+                solution = evolve(instance.graph, 282, true);
                 break;
         }
         u64 elapsed = stm_since(start);
@@ -1693,9 +1698,11 @@ int main(int argc, char *argv[]) {
 
     write_entire_file("results/kroA/pos.dat", instance.positions);
     run_experiment(instance, "HEA-LS", "kroA", false, 0, 4);
-    instance = parse_file("data/kroB200.tsp");
-    write_entire_file("results/kroB/pos.dat", instance.positions);
-    run_experiment(instance, "HEA-LS", "kroB", false, 0, 4);
+    run_experiment(instance, "HEA+LS", "kroA", false, 0, 5);
+    // instance = parse_file("data/kroB200.tsp");
+    // write_entire_file("results/kroB/pos.dat", instance.positions);
+    // run_experiment(instance, "HEA-LS", "kroB", false, 0, 4);
+    // run_experiment(instance, "HEA+LS", "kroB", false, 0, 5);
 
     return 0;
 }
