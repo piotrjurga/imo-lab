@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import itertools
 
-if 1:
+if 0:
     # dumb debug code
     pos = np.fromfile(f'results/pos.dat', dtype=np.int32)
     pos = pos.reshape([-1, 2])
@@ -23,8 +23,9 @@ if 1:
     plt.show()
     exit()
 
-instances = ["kroA200", "kroB200"]
-methods = ["msls", "ils1", "ils2", "ils2a"]
+#instances = ["kroA200", "kroB200"]
+instances = ["kroA", "kroB"]
+methods = ["HEA-LS", "HEA+LS"]
 
 for instance in instances:
     pos = np.fromfile(f'results/{instance}/pos.dat', dtype=np.int32)

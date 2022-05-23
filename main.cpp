@@ -1486,77 +1486,6 @@ Solution ils2(GraphMatrix graph, Solution init, bool local_search, s32 time_limi
     return best_solution;
 }
 
-ExperimentResult run_experiment(Instance instance, const char *method_name, const char *instance_name, bool random_initial_solution, s32 time_limit, s32 method_switch, s32 node_switch=1, s32 edge_switch=5, s32 percentage=20) {
-    Solution min_solution, max_solution;
-    ExperimentResult experiment_result = {
-        .min = INT32_MAX,
-        .max = INT32_MIN
-        };
-    s32 n = 10;
-    s32 total_score = 0;
-    u64 min_time = INT64_MAX;
-    u64 max_time = 0;
-    u64 total_time = 0;
-    
-    for (int i = 0; i < n; i++) {
-        Solution solution, initial_solution;
-        u64 start = stm_now();
-        switch(method_switch) {
-            case 0:
-                solution = msls(instance.graph, 100);
-            case 1:
-                initial_solution = random_initial_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
-                solution = ils1(instance.graph, initial_solution, time_limit, node_switch, edge_switch);
-                break;
-            case 2:
-                initial_solution = random_initial_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
-                solution = ils2(instance.graph, initial_solution, true, time_limit, percentage);
-                break;
-            case 3:
-                initial_solution = random_initial_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
-                solution = ils2(instance.graph, initial_solution, false, time_limit, percentage);
-                break;
-        }
-        u64 elapsed = stm_since(start);
-        if (elapsed < min_time) min_time = elapsed;
-        if (elapsed > max_time) max_time = elapsed;
-        total_time += elapsed;
-        auto solution_score = score(instance.graph, solution);
-        total_score += solution_score;
-
-        if (solution_score < experiment_result.min) {
-            experiment_result.min = solution_score;
-            experiment_result.best_solution = solution;
-        }
-        if (solution_score > experiment_result.max) {
-            experiment_result.max = solution_score;
-        }
-    }
-
-    experiment_result.average = total_score/(f64)n;
-    auto average_time = stm_ms(total_time)/(f64)n;
-    experiment_result.average_time = average_time;
-
-    std::string result_filepath = "results/"+std::string(instance_name)+"/"+std::string(method_name);
-    write_entire_file((result_filepath+"-a.dat").c_str(), experiment_result.best_solution.loop_a);
-    write_entire_file((result_filepath+"-b.dat").c_str(), experiment_result.best_solution.loop_b);
-
-    verify_solution(instance, experiment_result.best_solution);
-    printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, stm_ms(min_time), stm_ms(max_time));
-
-    return experiment_result;
-}
-
-void run_experiment_for_instance(std::string instance_name) {
-    auto instance = parse_file(("data/" + instance_name + ".tsp").c_str());
-    write_entire_file(("results/" + instance_name + "/pos.dat").c_str(), instance.positions);
-    printf("running experiments for %s\n", instance_name.c_str());
-    auto time_limit = run_experiment(instance, "msls", instance_name.c_str(), false, 0, 0).average_time - 20;
-    run_experiment(instance, "ils1", instance_name.c_str(), false, time_limit, 1);
-    run_experiment(instance, "ils2", instance_name.c_str(), false, time_limit, 2);
-    run_experiment(instance, "ils2a", instance_name.c_str(), false, time_limit, 3);
-}
-
 Solution evolve(GraphMatrix graph, s32 max_iters) {
     constexpr s32 population_count = 20;
     SolutionList elite[population_count];
@@ -1625,16 +1554,18 @@ Solution evolve(GraphMatrix graph, s32 max_iters) {
         auto fixed = greedy_loop(graph, &visit_list);
         s32 new_score = score(graph, fixed);
         child = to_linked_list(fixed);
-        new_score += neighbour_search_edge_cache(graph, child);
+        //new_score += neighbour_search_edge_cache(graph, child);
         auto [_, inserted] = score_set.insert(new_score);
         if (inserted) {
             s32 worst = 0;
             for (s32 i = 0; i < population_count; i++) {
                 if (scores[i] > scores[worst]) worst = i;
             }
-            score_set.erase(scores[worst]);
-            elite[worst] = std::move(child);
-            scores[worst] = new_score;
+            if (scores[worst] > new_score) {
+                score_set.erase(scores[worst]);
+                elite[worst] = std::move(child);
+                scores[worst] = new_score;
+            }
         }
     }
 
@@ -1645,6 +1576,80 @@ Solution evolve(GraphMatrix graph, s32 max_iters) {
     return to_visit_list(elite[best]);
 }
 
+ExperimentResult run_experiment(Instance instance, const char *method_name, const char *instance_name, bool random_initial_solution, s32 time_limit, s32 method_switch, s32 node_switch=1, s32 edge_switch=5, s32 percentage=20) {
+    Solution min_solution, max_solution;
+    ExperimentResult experiment_result = {
+        .min = INT32_MAX,
+        .max = INT32_MIN
+        };
+    s32 n = 10;
+    s32 total_score = 0;
+    u64 min_time = INT64_MAX;
+    u64 max_time = 0;
+    u64 total_time = 0;
+    
+    for (int i = 0; i < n; i++) {
+        Solution solution, initial_solution;
+        u64 start = stm_now();
+        switch(method_switch) {
+            case 0:
+                solution = msls(instance.graph, 100);
+            case 1:
+                initial_solution = random_initial_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
+                solution = ils1(instance.graph, initial_solution, time_limit, node_switch, edge_switch);
+                break;
+            case 2:
+                initial_solution = random_initial_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
+                solution = ils2(instance.graph, initial_solution, true, time_limit, percentage);
+                break;
+            case 3:
+                initial_solution = random_initial_solution ? random_solution(instance.graph.dim) : greedy_loop(instance.graph);
+                solution = ils2(instance.graph, initial_solution, false, time_limit, percentage);
+                break;
+            case 4:
+                solution = evolve(instance.graph, 100);
+                break;
+        }
+        u64 elapsed = stm_since(start);
+        if (elapsed < min_time) min_time = elapsed;
+        if (elapsed > max_time) max_time = elapsed;
+        total_time += elapsed;
+        auto solution_score = score(instance.graph, solution);
+        total_score += solution_score;
+
+        if (solution_score < experiment_result.min) {
+            experiment_result.min = solution_score;
+            experiment_result.best_solution = solution;
+        }
+        if (solution_score > experiment_result.max) {
+            experiment_result.max = solution_score;
+        }
+    }
+
+    experiment_result.average = total_score/(f64)n;
+    auto average_time = stm_ms(total_time)/(f64)n;
+    experiment_result.average_time = average_time;
+
+    std::string result_filepath = "results/"+std::string(instance_name)+"/"+std::string(method_name);
+    write_entire_file((result_filepath+"-a.dat").c_str(), experiment_result.best_solution.loop_a);
+    write_entire_file((result_filepath+"-b.dat").c_str(), experiment_result.best_solution.loop_b);
+
+    verify_solution(instance, experiment_result.best_solution);
+    printf("%s %s: %.2f (%d - %d)\t/\t%.2f (%.2f - %.2f)\n", instance_name, method_name, experiment_result.average, experiment_result.min, experiment_result.max, average_time, stm_ms(min_time), stm_ms(max_time));
+
+    return experiment_result;
+}
+
+void run_experiment_for_instance(std::string instance_name) {
+    auto instance = parse_file(("data/" + instance_name + ".tsp").c_str());
+    write_entire_file(("results/" + instance_name + "/pos.dat").c_str(), instance.positions);
+    printf("running experiments for %s\n", instance_name.c_str());
+    auto time_limit = run_experiment(instance, "msls", instance_name.c_str(), false, 0, 0).average_time - 20;
+    run_experiment(instance, "ils1", instance_name.c_str(), false, time_limit, 1);
+    run_experiment(instance, "ils2", instance_name.c_str(), false, time_limit, 2);
+    run_experiment(instance, "ils2a", instance_name.c_str(), false, time_limit, 3);
+}
+
 int main(int argc, char *argv[]) {
     //srand(time(0));
     // srand(std::atoi(argv[1]));
@@ -1652,6 +1657,7 @@ int main(int argc, char *argv[]) {
     stm_setup();
 
     auto instance = parse_file("data/kroA200.tsp");
+#if 0
     auto init = greedy_loop(instance.graph);
     s32 greedy_score = score(instance.graph, init);
     printf("greedy %d\n", greedy_score);
@@ -1660,17 +1666,36 @@ int main(int argc, char *argv[]) {
     printf("ls %d\n", ls_score);
 
     s32 sum = 0;
-    u64 time_sum = 0;
+    s32 min_score = INT32_MAX;
+    s32 max_score = 0;
+    s64 time_sum = 0;
+    s64 min_dt = INT64_MAX;
+    s64 max_dt = 0;
+    Solution best;
     for (s32 i = 0; i < 10; i++) {
         auto start = stm_now();
-        auto evolve_res = evolve(instance.graph, 200);
+        auto evolve_res = evolve(instance.graph, 80);
         auto dt = stm_since(start);
-        s32 evolve_score = score(instance.graph, evolve_res);
-        sum += evolve_score;
+        s32 s = score(instance.graph, evolve_res);
+        sum += s;
         time_sum += dt;
-        printf("evolve %d\t%.3f ms\n", evolve_score, stm_ms(dt));
+        min_dt = (dt < min_dt) ? dt : min_dt;
+        max_dt = (dt > max_dt) ? dt : max_dt;
+        if (s < min_score) {
+            best = evolve_res;
+        }
+        min_score = (s < min_score) ? s : min_score;
+        max_score = (s > max_score) ? s : max_score;
+        printf("evolve %d\t%.2f ms\n", s, stm_ms(dt));
     }
-    printf("avg = %d\t%.3f ms\n", sum / 10, stm_ms(time_sum)/10);
+    printf("avg = %d (%d - %d)\t%.2f ms (%.2f - %.2f)\n", sum / 10, min_score, max_score, stm_ms(time_sum)/10, stm_ms(min_dt), stm_ms(max_dt));
+#endif
+
+    write_entire_file("results/kroA/pos.dat", instance.positions);
+    run_experiment(instance, "HEA-LS", "kroA", false, 0, 4);
+    instance = parse_file("data/kroB200.tsp");
+    write_entire_file("results/kroB/pos.dat", instance.positions);
+    run_experiment(instance, "HEA-LS", "kroB", false, 0, 4);
 
     return 0;
 }

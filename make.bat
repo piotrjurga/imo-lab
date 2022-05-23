@@ -1,2 +1,2 @@
 @echo off
-cl /Zi /EHsc /std:c++20 /nologo main.cpp
+cl /O2 /EHsc /std:c++20 /nologo main.cpp
