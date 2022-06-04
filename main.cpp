@@ -1486,6 +1486,115 @@ Solution ils2(GraphMatrix graph, Solution init, bool local_search, s32 time_limi
     return best_solution;
 }
 
+void greedy_fix(GraphMatrix graph, SolutionList& result, std::vector<s32>& available, std::vector<bool>& avail, s32 loop_count[2]) {
+    s32 max_loop_a_size = graph.dim / 2 + (graph.dim & 1);
+    s32 max_loop_b_size = graph.dim - max_loop_a_size;
+
+    while (available.size() > 0) {
+        s32 best_node = 0;
+        s32 best_avail = 0;
+        s32 best_cost = INT32_MAX;
+
+        bool can_expand[2] = { loop_count[0] < max_loop_a_size, loop_count[1] < max_loop_b_size };
+        for (s32 node = 0; node < graph.dim; node++) {
+            if (avail[node]) continue;
+            auto l = result.loop[node];
+            if (!can_expand[l]) continue;
+            s32 next = result[node].next;
+            s32 old_cost = graph.get(node, next);
+
+            s32 best_inter = 0;
+            s32 best_inter_cost = INT32_MAX;
+            for (s32 i = 0; i < available.size(); i++) {
+                s32 idx = available[i];
+                s32 cost = graph.get(node, idx) + graph.get(next, idx) - old_cost;
+                if (cost < best_inter_cost) {
+                    best_inter = i;
+                    best_inter_cost = cost;
+                }
+            }
+
+            if (best_inter_cost < best_cost) {
+                best_node = node;
+                best_avail = best_inter;
+                best_cost = best_inter_cost;
+            }
+        }
+
+        s32 new_node = available[best_avail];
+        vector_remove_idx(available, best_avail);
+        avail[new_node] = false;
+
+        s32 next = result[best_node].next;
+        result[best_node].next = new_node;
+        result[new_node].prev = best_node;
+        result[new_node].next = next;
+        result[next].prev = new_node;
+        result.loop[new_node] = result.loop[best_node];
+        loop_count[result.loop[best_node]]++;
+    }
+}
+
+void regret_fix(GraphMatrix graph, SolutionList& result, std::vector<s32>& available, std::vector<bool>& avail, s32 loop_count[2]) {
+    s32 max_loop_a_size = graph.dim / 2 + (graph.dim & 1);
+    s32 max_loop_b_size = graph.dim - max_loop_a_size;
+
+    while (available.size() > 0) {
+        s32 best_node = 0;
+        s32 best_avail = 0;
+        s32 best_cost = INT32_MAX;
+
+        bool can_expand[2] = { loop_count[0] < max_loop_a_size, loop_count[1] < max_loop_b_size };
+        for (s32 node = 0; node < graph.dim; node++) {
+            if (avail[node]) continue;
+            auto l = result.loop[node];
+            if (!can_expand[l]) continue;
+            s32 next = result[node].next;
+            s32 old_cost = graph.get(node, next);
+
+            s32 best_inter = 0;
+            s32 best_inter_cost = INT32_MAX;
+            s32 second_inter_cost = INT32_MAX;
+            for (s32 i = 0; i < available.size(); i++) {
+                s32 idx = available[i];
+                s32 cost = graph.get(node, idx) + graph.get(next, idx) - old_cost;
+                if (cost < best_inter_cost) {
+                    best_inter = i;
+                    second_inter_cost = best_inter_cost;
+                    best_inter_cost = cost;
+                } else if (cost < second_inter_cost) second_inter_cost = cost;
+            }
+            best_inter_cost = best_inter_cost - second_inter_cost/32;
+
+            if (best_inter_cost < best_cost) {
+                best_node = node;
+                best_avail = best_inter;
+                best_cost = best_inter_cost;
+            }
+        }
+
+        s32 new_node = available[best_avail];
+        vector_remove_idx(available, best_avail);
+        avail[new_node] = false;
+
+        s32 next = result[best_node].next;
+        result[best_node].next = new_node;
+        result[new_node].prev = best_node;
+        result[new_node].next = next;
+        result[next].prev = new_node;
+        result.loop[new_node] = result.loop[best_node];
+        loop_count[result.loop[best_node]]++;
+    }
+}
+
+s32 score(GraphMatrix graph, SolutionList& list) {
+    s32 result = 0;
+    for (s32 i = 0; i < graph.dim; i++) {
+        result += graph.get(i, list[i].next);
+    }
+    return result;
+}
+
 Solution evolve(GraphMatrix graph, s32 time_limit, bool ls) {
     constexpr s32 population_count = 20;
     SolutionList elite[population_count];
@@ -1494,75 +1603,91 @@ Solution evolve(GraphMatrix graph, s32 time_limit, bool ls) {
 
     u64 timestart = stm_now();
     s32 added = 0;
+    std::vector<s32> available(graph.dim-2);
+    std::vector<bool> avail(graph.dim);
     while (added < population_count) {
-        auto init = greedy_loop(graph);
+        //auto init = greedy_loop(graph);
         //auto init = random_solution(graph.dim);
-        elite[added] = to_linked_list(init);
-        scores[added] = score(graph, init);
-        scores[added] += neighbour_search_edge_cache(graph, elite[added]);
+        //elite[added] = to_linked_list(init);
+        auto& list = elite[added];
+        {
+            // make a random solution
+            list.nodes.resize(graph.dim);
+            list.loop.resize(graph.dim);
+            s32 node_a = rand() % graph.dim;
+            s32 node_b = rand() % (graph.dim-1);
+            node_b += (node_b == node_a);
+            if (node_a > node_b) {
+                s32 t = node_a;
+                node_a = node_b;
+                node_b = t;
+            }
+            list[node_a].next = list[node_a].prev = node_a;
+            list[node_b].next = list[node_b].prev = node_b;
+            list.loop[node_a] = 0;
+            list.loop[node_b] = 1;
+            available.resize(graph.dim-2);
+            for (s32 i = 0; i < graph.dim-2; i++) {
+                available[i] = i + (i >= node_a) + (i+1 >= node_b);
+            }
+            avail.flip();
+            avail[node_a] = avail[node_b] = false;
+            s32 loop_count[2] = { 1, 1 };
+            regret_fix(graph, list, available, avail, loop_count);
+        }
+        scores[added] = score(graph, list);
+        scores[added] += neighbour_search_edge_cache(graph, list);
         auto [_, inserted] = score_set.insert(scores[added]);
         if (inserted) added++;
     }
 
     while (stm_ms(stm_since(timestart)) < time_limit) {
+    //s32 iters = 0;
+    //while (iters++ < 200) {
         s32 parent_a = rand() % population_count;
         s32 parent_b = rand() % (population_count-1);
         parent_b += (parent_b == parent_a);
         SolutionList child = elite[parent_a];
+        auto& pa = elite[parent_a];
         auto& pb = elite[parent_b];
-        s32 start[2] = {};
-        while (start[0] < child.nodes.size() && (
-               child[start[0]].prev != pb[start[0]].prev ||
-               child[start[0]].next != pb[start[0]].next))
-        {
-            start[0]++;
-        }
-        while (start[1] < child.nodes.size() && (
-               child.loop[start[1]] == child.loop[start[0]] ||
-               child[start[1]].prev != pb[start[1]].prev ||
-               child[start[1]].next != pb[start[1]].next))
-        {
-            start[1]++;
-        }
-        if (start[0] == child.nodes.size() || start[1] == child.nodes.size()) {
-            //puts("not good");
-            continue;
-        }
 
         std::vector<s32> removed_nodes;
         removed_nodes.reserve(child.nodes.size());
-        Solution visit_list;
-        for (s32 si = 0; si < 2; si++) {
-            auto& loop = si ? visit_list.loop_b : visit_list.loop_a;
-            loop.reserve(child.nodes.size());
-            s32 node = start[si];
-            s32 last_inserted = node;
-            do {
-                auto n = child[node];
-                if (n.prev != pb[node].prev || n.next != pb[node].next) {
-                    removed_nodes.push_back(node);
-                } else {
-                    //child[last_inserted].next = node;
-                    //child[node].prev = last_inserted;
-                    //last_inserted = node;
-                    loop.push_back(node);
-                }
-                node = n.next;
-            } while (node != start[si]);
+        std::vector<bool> available(child.nodes.size());
+        s32 loop_count[2] = { graph.dim / 2 + (graph.dim & 1), graph.dim / 2 };
+        for (s32 i = 0; i < pa.nodes.size(); i++) {
+            auto a = pa[i];
+            auto b = pb[i];
+            auto l = child.loop[i];
+            //if (loop_count[l] > 1 && (a.next != b.next || a.prev != b.prev)) {
+            //if (loop_count[l] > 1 && (a.next != b.next)) {
+            if (loop_count[l] > 1 && (a.next != b.next)) {
+            //if (rand()%100 < 70) {
+                auto n = child[i];
+                child[n.prev].next = n.next;
+                child[n.next].prev = n.prev;
+                removed_nodes.push_back(i);
+                available[i] = true;
+                loop_count[l]--;
+            }
         }
 
-        // TODO(piotr): replace this with better incremental greedy_loop
-        auto fixed = greedy_loop(graph, &visit_list);
-        s32 new_score = score(graph, fixed);
-        child = to_linked_list(fixed);
+#if 0
+        //printf("a: %d\tb: %d\n", loop_count[0], loop_count[1]);
+        printf("removing %d nodes\n", removed_nodes.size());
+#endif
+        //greedy_fix(graph, child, removed_nodes, available, loop_count);
+        regret_fix(graph, child, removed_nodes, available, loop_count);
+        s32 new_score = score(graph, child);
+
         if (ls) new_score += neighbour_search_edge_cache(graph, child);
-        auto [_, inserted] = score_set.insert(new_score);
-        if (inserted) {
-            s32 worst = 0;
-            for (s32 i = 0; i < population_count; i++) {
-                if (scores[i] > scores[worst]) worst = i;
-            }
-            if (scores[worst] > new_score) {
+        s32 worst = 0;
+        for (s32 i = 0; i < population_count; i++) {
+            if (scores[i] > scores[worst]) worst = i;
+        }
+        if (scores[worst] > new_score) {
+            auto [_, inserted] = score_set.insert(new_score);
+            if (inserted) {
                 score_set.erase(scores[worst]);
                 elite[worst] = std::move(child);
                 scores[worst] = new_score;
@@ -1583,7 +1708,7 @@ ExperimentResult run_experiment(Instance instance, const char *method_name, cons
         .min = INT32_MAX,
         .max = INT32_MIN
         };
-    s32 n = 10;
+    s32 n = 40;
     s32 total_score = 0;
     u64 min_time = INT64_MAX;
     u64 max_time = 0;
@@ -1656,48 +1781,15 @@ void run_experiment_for_instance(std::string instance_name) {
 }
 
 int main(int argc, char *argv[]) {
-    //srand(time(0));
+    srand(time(0));
     // srand(std::atoi(argv[1]));
-    srand(0);
+    //srand(0);
     stm_setup();
 
     auto instance = parse_file("data/kroA200.tsp");
-#if 0
-    auto init = greedy_loop(instance.graph);
-    s32 greedy_score = score(instance.graph, init);
-    printf("greedy %d\n", greedy_score);
-    auto sol = neighbour_search_edge_cache(instance.graph, init);
-    s32 ls_score = score(instance.graph, sol);
-    printf("ls %d\n", ls_score);
-
-    s32 sum = 0;
-    s32 min_score = INT32_MAX;
-    s32 max_score = 0;
-    s64 time_sum = 0;
-    s64 min_dt = INT64_MAX;
-    s64 max_dt = 0;
-    Solution best;
-    for (s32 i = 0; i < 10; i++) {
-        auto start = stm_now();
-        auto evolve_res = evolve(instance.graph, 80);
-        auto dt = stm_since(start);
-        s32 s = score(instance.graph, evolve_res);
-        sum += s;
-        time_sum += dt;
-        min_dt = (dt < min_dt) ? dt : min_dt;
-        max_dt = (dt > max_dt) ? dt : max_dt;
-        if (s < min_score) {
-            best = evolve_res;
-        }
-        min_score = (s < min_score) ? s : min_score;
-        max_score = (s > max_score) ? s : max_score;
-        printf("evolve %d\t%.2f ms\n", s, stm_ms(dt));
-    }
-    printf("avg = %d (%d - %d)\t%.2f ms (%.2f - %.2f)\n", sum / 10, min_score, max_score, stm_ms(time_sum)/10, stm_ms(min_dt), stm_ms(max_dt));
-#endif
-
     write_entire_file("results/kroA/pos.dat", instance.positions);
-    run_experiment(instance, "HEA-LS", "kroA", false, 0, 4);
+
+    //run_experiment(instance, "HEA-LS", "kroA", false, 0, 4);
     run_experiment(instance, "HEA+LS", "kroA", false, 0, 5);
     // instance = parse_file("data/kroB200.tsp");
     // write_entire_file("results/kroB/pos.dat", instance.positions);

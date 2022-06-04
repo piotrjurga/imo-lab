@@ -25,7 +25,8 @@ if 0:
 
 #instances = ["kroA200", "kroB200"]
 instances = ["kroA", "kroB"]
-methods = ["HEA-LS", "HEA+LS"]
+#methods = ["HEA-LS", "HEA+LS"]
+methods = ["HEA+LS"]
 
 for instance in instances:
     pos = np.fromfile(f'results/{instance}/pos.dat', dtype=np.int32)
