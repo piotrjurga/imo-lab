@@ -1791,33 +1791,24 @@ Solution evolve_mt(GraphMatrix graph, s32 time_limit, bool ls) {
         //
 #pragma omp parallel for
         for (s32 child_idx = parent_count; child_idx < population_count; child_idx++) {
-#if 0
-            s32 parent_a, parent_b;
-            parent_a = child_idx / parent_count - 1;
-            parent_b = child_idx % parent_count;
-            if (parent_a == parent_b) {
-                parent_b = (parent_b+1) % parent_count;
-            }
-#else
             Parents p = parent_indices[child_idx-parent_count];
             s32 parent_a = p.a;
             s32 parent_b = p.b;
-#endif
             SolutionList child = elite[parent_a];
-            auto& pa = elite[parent_a];
-            auto& pb = elite[parent_b];
+            //auto& pa = elite[parent_a];
+            //auto& pb = elite[parent_b];
 
             std::vector<s32> removed_nodes;
             removed_nodes.reserve(graph.dim);
             std::vector<bool> available(graph.dim);
             s32 loop_count[2] = { graph.dim / 2 + (graph.dim & 1), graph.dim / 2 };
             for (s32 i = 0; i < graph.dim; i++) {
-                auto a = pa[i];
-                auto b = pb[i];
+                //auto a = pa[i];
+                //auto b = pb[i];
                 auto l = child.loop[i];
                 //if (loop_count[l] > 1 && (a.next != b.next || a.prev != b.prev)) {
-                //if (loop_count[l] > 1 && (a.next != b.next)) {
-                if (loop_count[l] > 1 && (a.next != b.next)) {
+                //if (loop_count[l] > 1 && ((a.next != b.next) || (rand()%100 < 20))) {
+                if (loop_count[l] > 1 && (rand()%100 < 60)) {
                     auto n = child[i];
                     child[n.prev].next = n.next;
                     child[n.next].prev = n.prev;
@@ -1827,7 +1818,6 @@ Solution evolve_mt(GraphMatrix graph, s32 time_limit, bool ls) {
                 }
             }
 
-            //greedy_fix(graph, child, removed_nodes, available, loop_count);
             regret_fix(graph, child, removed_nodes, available, loop_count);
             s32 new_score = score(graph, child);
 
@@ -1863,7 +1853,7 @@ ExperimentResult run_experiment(Instance instance, const char *method_name, cons
         .min = INT32_MAX,
         .max = INT32_MIN
         };
-    s32 n = 10;
+    s32 n = 100;
     s32 total_score = 0;
     u64 min_time = INT64_MAX;
     u64 max_time = 0;
