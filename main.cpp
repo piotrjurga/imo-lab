@@ -1780,17 +1780,161 @@ void run_experiment_for_instance(std::string instance_name) {
     run_experiment(instance, "ils2a", instance_name.c_str(), false, time_limit, 3);
 }
 
+void globalConvexity(Instance instance, s32 n = 1000) {
+    std::vector<Solution> solutions;
+    solutions.reserve(n);
+    s32 solution_score;
+    Solution solution;
+    s32 best_score = INT32_MAX;
+    s32 best_index;
+
+    printf("solving random+ls\n");
+    for(s32 i=0; i<n; i++) {
+        if (i%(n/10)==0) {
+            printf("%d\n", i);
+        }
+        solution = random_solution(instance.graph.dim);
+        solution = neighbour_search_edge_cache(instance.graph, solution);
+        solutions.push_back(solution);
+        solution_score = score(instance.graph, solution);
+        if (solution_score < best_score) {
+            best_score = solution_score;
+            best_index = solutions.size()-1;
+        }
+    }
+
+    s32 dim = instance.graph.dim;
+    std::vector<GraphMatrix> solutions_to_matrix;
+    solutions_to_matrix.reserve(n);
+    s32 solutions_to_list[n][dim] = {0};
+    std::vector<s32> scores;
+    scores.reserve(n);
+
+    for(s32 k=0; k<n; k++) {
+        if (k%(n/10)==0) {
+            printf("%d\n", k);
+        }
+        solution = solutions[k];
+        
+        GraphMatrix matrix;
+        matrix.dim = dim;
+        matrix.cells = (s32 *)malloc(sizeof(s32) * dim * dim);
+        std::fill_n(matrix.cells, dim*dim, 0);
+
+        for(s32 i=0; i<solution.loop_a.size(); i++) {
+            s32 v1 = solution.loop_a[i];
+            s32 v2 = solution.loop_a[(i+1) % solution.loop_a.size()];
+            matrix.cells[v1*dim+v2]=1;
+            matrix.cells[v2*dim+v1]=1;
+            solutions_to_list[k][v1]=1;
+        }
+
+        for(s32 i=0; i<solution.loop_b.size(); i++) {
+            s32 v1 = solution.loop_b[i];
+            s32 v2 = solution.loop_b[(i+1) % solution.loop_b.size()];
+            matrix.cells[v1*dim+v2]=-1;
+            matrix.cells[v2*dim+v1]=-1;
+            solutions_to_list[k][v1]=-1;
+        }
+
+        scores.push_back(score(instance.graph, solution));
+        solutions_to_matrix.push_back(matrix);
+    }
+
+    
+    std::vector<f64> common_edges_averages;
+    std::vector<f64> common_edges_best;
+    std::vector<f64> common_vertices_averages;
+    std::vector<f64> common_vertices_best;
+
+    common_edges_averages.reserve(n);
+    common_edges_best.reserve(n);
+    common_vertices_averages.reserve(n);
+    common_vertices_best.reserve(n);
+
+
+    printf("calculating similarity\n");
+    for(s32 k=0; k<n; k++){
+        if (k%(n/10)==0) {
+            printf("%d\n", k);
+        }
+        solution = solutions[k];
+
+        f64 common_edges_count=0;
+        f64 common_vertices_count=0;
+
+        f64 common_edges_count_best=0;
+        f64 common_vertices_count_best=0;
+
+        //average
+        for (s32 l=0; l<n; l++) {
+            for(s32 i=0; i<solution.loop_a.size(); i++) {
+                s32 v1 = solution.loop_a[i];
+                s32 v2 = solution.loop_a[(i+1) % solution.loop_a.size()];
+                s32 edge = solutions_to_matrix[l].get(v1, v2);
+                if(edge!=0) {
+                // if(edge==1) {
+                    if (k!=l) common_edges_count++;
+                    if (l==best_index) common_edges_count_best++;
+                }
+            }
+
+            for(s32 i=0; i<solution.loop_b.size(); i++) {
+                s32 v1 = solution.loop_b[i];
+                s32 v2 = solution.loop_b[(i+1) % solution.loop_b.size()];
+                s32 edge = solutions_to_matrix[l].get(v1, v2);
+                if(edge!=0) {
+                // if(edge==-1) { 
+                    if (k!=l) common_edges_count++;
+                    if (l==best_index) common_edges_count_best++;
+                }
+            }
+
+            s32 aa=0, ab=0, ba=0, bb=0; // aa, ab, ba, bb
+            for(s32 i=0; i<dim; i++) {
+                s32 vk = solutions_to_list[k][i];
+                s32 vl = solutions_to_list[l][i];
+
+                if (vk != 0 && vl != 0) {
+                    if (vk == 1 && vl == 1) aa++;
+                    if (vk == 1 && vl == -1) ab++;
+                    if (vk == -1 && vl == 1) ba++;
+                    if (vk == -1 && vl == -1) bb++;
+                }
+            }
+            if (k!=l) common_vertices_count += std::max(aa, ab) + std::max(ba, bb);
+            if (l==best_index) common_vertices_count_best = std::max(aa, ab) + std::max(ba, bb);
+            
+            if (l==best_index) {
+                common_edges_best.push_back(common_edges_count_best);
+                common_vertices_best.push_back(common_vertices_count_best);
+            }
+        }
+
+         
+        common_edges_averages.push_back(common_edges_count / (float) (n - 1));
+        common_vertices_averages.push_back(common_vertices_count / (float) (n-1));
+    }   
+
+    write_entire_file("results/scores.dat", scores);
+    write_entire_file("results/edge_average.dat", common_edges_averages);
+    write_entire_file("results/vertex_average.dat", common_vertices_averages);
+    write_entire_file("results/edge_best.dat", common_edges_best);
+    write_entire_file("results/vertex_best.dat", common_vertices_best);
+}
+
 int main(int argc, char *argv[]) {
     srand(time(0));
-    // srand(std::atoi(argv[1]));
-    //srand(0);
     stm_setup();
 
-    auto instance = parse_file("data/kroA200.tsp");
-    write_entire_file("results/kroA/pos.dat", instance.positions);
+    auto instance = parse_file("data/kroB200.tsp");
+
+    globalConvexity(instance);
+
+    // write_entire_file("results/kroA/pos.dat", instance.positions);
 
     //run_experiment(instance, "HEA-LS", "kroA", false, 0, 4);
-    run_experiment(instance, "HEA+LS", "kroA", false, 0, 5);
+    // run_experiment(instance, "HEA+LS", "kroA", false, 0, 5);
     // instance = parse_file("data/kroB200.tsp");
     // write_entire_file("results/kroB/pos.dat", instance.positions);
     // run_experiment(instance, "HEA-LS", "kroB", false, 0, 4);
