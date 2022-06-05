@@ -1564,7 +1564,7 @@ void regret_fix(GraphMatrix graph, SolutionList& result, std::vector<s32>& avail
                     best_inter_cost = cost;
                 } else if (cost < second_inter_cost) second_inter_cost = cost;
             }
-            best_inter_cost = best_inter_cost - second_inter_cost/32;
+            best_inter_cost = best_inter_cost - second_inter_cost/256;
 
             if (best_inter_cost < best_cost) {
                 best_node = node;
@@ -1721,8 +1721,8 @@ int cmp_s32(const void *a, const void *b) {
 }
 
 Solution evolve_mt(GraphMatrix graph, s32 time_limit, bool ls) {
-    constexpr s32 population_count = 80;
-    constexpr s32 parent_count = 10;
+    constexpr s32 parent_count = 16;
+    constexpr s32 population_count = parent_count*(parent_count-1)/2 + parent_count;
     SolutionList elite[population_count];
     SolutionList parents[parent_count];
     struct Score {
@@ -1743,25 +1743,35 @@ Solution evolve_mt(GraphMatrix graph, s32 time_limit, bool ls) {
         auto& list = elite[i];
         bool success = false;
         scores[i].idx = i;
-        while (!success) {
-            s32 node_a = random[i] % (population_count);
-            // c std lib rand is not multithreaded by default!
-            random[i] = ((random[i] >> 17) ^ (random[i] << 11) ^ (random[i] >> 5)) & 0x7fffffff;
-            s32 node_b = random[i] % (population_count-1);
-            node_b += (node_b == node_a);
-            regret_solve(graph, list, node_a, node_b);
-            scores[i].score = score(graph, list);
-            scores[i].score += neighbour_search_edge_cache(graph, list);
+        s32 node_a = random[i] % (population_count);
+        // c std lib rand is not multithreaded by default!
+        random[i] = ((random[i] >> 17) ^ (random[i] << 11) ^ (random[i] >> 5)) & 0x7fffffff;
+        s32 node_b = random[i] % (population_count-1);
+        node_b += (node_b == node_a);
+        regret_solve(graph, list, node_a, node_b);
+        scores[i].score = score(graph, list);
+        scores[i].score += neighbour_search_edge_cache(graph, list);
 #pragma omp critical
-            {
-                auto [_, inserted] = score_set.insert(scores[i].score);
-                success = inserted;
-            }
+        {
+            auto [_, inserted] = score_set.insert(scores[i].score);
+            success = inserted;
+        }
+        if (!success) {
+            scores[i].score = INT32_MAX;
         }
     }
     //score_set.insert(scores, scores+population_count);
     //printf("init with %zd copies\n", population_count - score_set.size());
     //printf("init took %.3f\n", stm_ms(stm_since(timestart)));
+
+    struct Parents { s32 a, b; };
+    Parents parent_indices[population_count-parent_count];
+    s32 parents_added = 0;
+    for (s32 i = 0; i < parent_count; i++) {
+        for (s32 j = i+1; j < parent_count; j++) {
+            parent_indices[parents_added++] = {i, j};
+        }
+    }
 
     while (stm_ms(stm_since(timestart)) < time_limit) {
         //
@@ -1781,13 +1791,18 @@ Solution evolve_mt(GraphMatrix graph, s32 time_limit, bool ls) {
         //
 #pragma omp parallel for
         for (s32 child_idx = parent_count; child_idx < population_count; child_idx++) {
+#if 0
             s32 parent_a, parent_b;
-#pragma omp critical
-            {
-                parent_a = rand() % parent_count;
-                parent_b = rand() % (parent_count-1);
+            parent_a = child_idx / parent_count - 1;
+            parent_b = child_idx % parent_count;
+            if (parent_a == parent_b) {
+                parent_b = (parent_b+1) % parent_count;
             }
-            parent_b += (parent_b == parent_a);
+#else
+            Parents p = parent_indices[child_idx-parent_count];
+            s32 parent_a = p.a;
+            s32 parent_b = p.b;
+#endif
             SolutionList child = elite[parent_a];
             auto& pa = elite[parent_a];
             auto& pb = elite[parent_b];
@@ -1878,7 +1893,7 @@ ExperimentResult run_experiment(Instance instance, const char *method_name, cons
                 break;
             case 5:
                 //solution = evolve(instance.graph, 282, true);
-                solution = evolve_mt(instance.graph, 282, true);
+                solution = evolve_mt(instance.graph, 282-4, true);
                 break;
         }
         u64 elapsed = stm_since(start);
@@ -2070,7 +2085,7 @@ int main(int argc, char *argv[]) {
     srand(time(0));
     stm_setup();
 
-    auto instance = parse_file("data/kroB200.tsp");
+    auto instance = parse_file("data/kroA200.tsp");
 
     //globalConvexity(instance);
 
