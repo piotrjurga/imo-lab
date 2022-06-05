@@ -1595,6 +1595,30 @@ s32 score(GraphMatrix graph, SolutionList& list) {
     return result;
 }
 
+void regret_solve(GraphMatrix graph, SolutionList& list, s32 node_a, s32 node_b) {
+    std::vector<s32> available(graph.dim-2);
+    std::vector<bool> avail(graph.dim);
+
+    list.nodes.resize(graph.dim);
+    list.loop.resize(graph.dim);
+    if (node_a > node_b) {
+        s32 t = node_a;
+        node_a = node_b;
+        node_b = t;
+    }
+    list[node_a].next = list[node_a].prev = node_a;
+    list[node_b].next = list[node_b].prev = node_b;
+    list.loop[node_a] = 0;
+    list.loop[node_b] = 1;
+    for (s32 i = 0; i < graph.dim-2; i++) {
+        available[i] = i + (i >= node_a) + (i+1 >= node_b);
+    }
+    avail.flip();
+    avail[node_a] = avail[node_b] = false;
+    s32 loop_count[2] = { 1, 1 };
+    regret_fix(graph, list, available, avail, loop_count);
+}
+
 Solution evolve(GraphMatrix graph, s32 time_limit, bool ls) {
     constexpr s32 population_count = 20;
     SolutionList elite[population_count];
@@ -1603,43 +1627,33 @@ Solution evolve(GraphMatrix graph, s32 time_limit, bool ls) {
 
     u64 timestart = stm_now();
     s32 added = 0;
-    std::vector<s32> available(graph.dim-2);
-    std::vector<bool> avail(graph.dim);
-    while (added < population_count) {
-        //auto init = greedy_loop(graph);
-        //auto init = random_solution(graph.dim);
-        //elite[added] = to_linked_list(init);
-        auto& list = elite[added];
-        {
-            // make a random solution
-            list.nodes.resize(graph.dim);
-            list.loop.resize(graph.dim);
-            s32 node_a = rand() % graph.dim;
-            s32 node_b = rand() % (graph.dim-1);
-            node_b += (node_b == node_a);
-            if (node_a > node_b) {
-                s32 t = node_a;
-                node_a = node_b;
-                node_b = t;
-            }
-            list[node_a].next = list[node_a].prev = node_a;
-            list[node_b].next = list[node_b].prev = node_b;
-            list.loop[node_a] = 0;
-            list.loop[node_b] = 1;
-            available.resize(graph.dim-2);
-            for (s32 i = 0; i < graph.dim-2; i++) {
-                available[i] = i + (i >= node_a) + (i+1 >= node_b);
-            }
-            avail.flip();
-            avail[node_a] = avail[node_b] = false;
-            s32 loop_count[2] = { 1, 1 };
-            regret_fix(graph, list, available, avail, loop_count);
-        }
-        scores[added] = score(graph, list);
-        scores[added] += neighbour_search_edge_cache(graph, list);
-        auto [_, inserted] = score_set.insert(scores[added]);
-        if (inserted) added++;
+    s32 random[population_count];
+    for (s32 i = 0; i < population_count; i++) {
+        random[i] = rand();
     }
+#pragma omp parallel for
+    for (s32 i = 0; i < population_count; i++) {
+        auto& list = elite[i];
+        bool success = false;
+        while (!success) {
+            s32 node_a = random[i] % (population_count);
+            // c std lib rand is not multithreaded by default!
+            random[i] = ((random[i] >> 17) ^ (random[i] << 11) ^ (random[i] >> 5)) & 0x7fffffff;
+            s32 node_b = random[i] % (population_count-1);
+            node_b += (node_b == node_a);
+            regret_solve(graph, list, node_a, node_b);
+            scores[i] = score(graph, list);
+            scores[i] += neighbour_search_edge_cache(graph, list);
+#pragma omp critical
+            {
+                auto [_, inserted] = score_set.insert(scores[i]);
+                success = inserted;
+            }
+        }
+    }
+    score_set.insert(scores, scores+population_count);
+    //printf("init with %zd copies\n", population_count - score_set.size());
+    //printf("init took %.3f\n", stm_ms(stm_since(timestart)));
 
     while (stm_ms(stm_since(timestart)) < time_limit) {
     //s32 iters = 0;
@@ -1652,10 +1666,10 @@ Solution evolve(GraphMatrix graph, s32 time_limit, bool ls) {
         auto& pb = elite[parent_b];
 
         std::vector<s32> removed_nodes;
-        removed_nodes.reserve(child.nodes.size());
-        std::vector<bool> available(child.nodes.size());
+        removed_nodes.reserve(graph.dim);
+        std::vector<bool> available(graph.dim);
         s32 loop_count[2] = { graph.dim / 2 + (graph.dim & 1), graph.dim / 2 };
-        for (s32 i = 0; i < pa.nodes.size(); i++) {
+        for (s32 i = 0; i < graph.dim; i++) {
             auto a = pa[i];
             auto b = pb[i];
             auto l = child.loop[i];
@@ -1702,13 +1716,139 @@ Solution evolve(GraphMatrix graph, s32 time_limit, bool ls) {
     return to_visit_list(elite[best]);
 }
 
+int cmp_s32(const void *a, const void *b) {
+    return (*(s32 *)a > *(s32 *)b) - (*(s32 *)a < *(s32 *)b);
+}
+
+Solution evolve_mt(GraphMatrix graph, s32 time_limit, bool ls) {
+    constexpr s32 population_count = 80;
+    constexpr s32 parent_count = 10;
+    SolutionList elite[population_count];
+    SolutionList parents[parent_count];
+    struct Score {
+        s32 score;
+        s32 idx;
+    };
+    Score scores[population_count];
+    std::unordered_set<s32> score_set(population_count);
+
+    u64 timestart = stm_now();
+    s32 added = 0;
+    s32 random[population_count];
+    for (s32 i = 0; i < population_count; i++) {
+        random[i] = rand();
+    }
+#pragma omp parallel for
+    for (s32 i = 0; i < population_count; i++) {
+        auto& list = elite[i];
+        bool success = false;
+        scores[i].idx = i;
+        while (!success) {
+            s32 node_a = random[i] % (population_count);
+            // c std lib rand is not multithreaded by default!
+            random[i] = ((random[i] >> 17) ^ (random[i] << 11) ^ (random[i] >> 5)) & 0x7fffffff;
+            s32 node_b = random[i] % (population_count-1);
+            node_b += (node_b == node_a);
+            regret_solve(graph, list, node_a, node_b);
+            scores[i].score = score(graph, list);
+            scores[i].score += neighbour_search_edge_cache(graph, list);
+#pragma omp critical
+            {
+                auto [_, inserted] = score_set.insert(scores[i].score);
+                success = inserted;
+            }
+        }
+    }
+    //score_set.insert(scores, scores+population_count);
+    //printf("init with %zd copies\n", population_count - score_set.size());
+    //printf("init took %.3f\n", stm_ms(stm_since(timestart)));
+
+    while (stm_ms(stm_since(timestart)) < time_limit) {
+        //
+        // find the best solutions from population
+        //
+        qsort(scores, population_count, sizeof(Score), cmp_s32);
+        for (s32 i = 0; i < parent_count; i++) {
+            parents[i] = std::move(elite[scores[i].idx]);
+            scores[i].idx = i;
+        }
+        for (s32 i = 0; i < parent_count; i++) {
+            elite[i] = std::move(parents[i]);
+        }
+
+        //
+        // produce new population from parents
+        //
+#pragma omp parallel for
+        for (s32 child_idx = parent_count; child_idx < population_count; child_idx++) {
+            s32 parent_a, parent_b;
+#pragma omp critical
+            {
+                parent_a = rand() % parent_count;
+                parent_b = rand() % (parent_count-1);
+            }
+            parent_b += (parent_b == parent_a);
+            SolutionList child = elite[parent_a];
+            auto& pa = elite[parent_a];
+            auto& pb = elite[parent_b];
+
+            std::vector<s32> removed_nodes;
+            removed_nodes.reserve(graph.dim);
+            std::vector<bool> available(graph.dim);
+            s32 loop_count[2] = { graph.dim / 2 + (graph.dim & 1), graph.dim / 2 };
+            for (s32 i = 0; i < graph.dim; i++) {
+                auto a = pa[i];
+                auto b = pb[i];
+                auto l = child.loop[i];
+                //if (loop_count[l] > 1 && (a.next != b.next || a.prev != b.prev)) {
+                //if (loop_count[l] > 1 && (a.next != b.next)) {
+                if (loop_count[l] > 1 && (a.next != b.next)) {
+                    auto n = child[i];
+                    child[n.prev].next = n.next;
+                    child[n.next].prev = n.prev;
+                    removed_nodes.push_back(i);
+                    available[i] = true;
+                    loop_count[l]--;
+                }
+            }
+
+            //greedy_fix(graph, child, removed_nodes, available, loop_count);
+            regret_fix(graph, child, removed_nodes, available, loop_count);
+            s32 new_score = score(graph, child);
+
+            if (ls) new_score += neighbour_search_edge_cache(graph, child);
+
+            bool success = false;
+#pragma omp critical
+            {
+                auto [_, inserted] = score_set.insert(new_score);
+                success = inserted;
+            }
+
+            if (success) {
+                elite[child_idx] = std::move(child);
+                scores[child_idx].idx = child_idx;
+                scores[child_idx].score = new_score;
+            } else {
+                scores[child_idx].score = INT32_MAX;
+            }
+        }
+    }
+
+    s32 best = 0;
+    for (s32 i = 0; i < population_count; i++) {
+        if (scores[i].score < scores[best].score) best = i;
+    }
+    return to_visit_list(elite[best]);
+}
+
 ExperimentResult run_experiment(Instance instance, const char *method_name, const char *instance_name, bool random_initial_solution, s32 time_limit, s32 method_switch, s32 node_switch=1, s32 edge_switch=5, s32 percentage=20) {
     Solution min_solution, max_solution;
     ExperimentResult experiment_result = {
         .min = INT32_MAX,
         .max = INT32_MIN
         };
-    s32 n = 40;
+    s32 n = 10;
     s32 total_score = 0;
     u64 min_time = INT64_MAX;
     u64 max_time = 0;
@@ -1737,7 +1877,8 @@ ExperimentResult run_experiment(Instance instance, const char *method_name, cons
                 solution = evolve(instance.graph, 282, false);
                 break;
             case 5:
-                solution = evolve(instance.graph, 282, true);
+                //solution = evolve(instance.graph, 282, true);
+                solution = evolve_mt(instance.graph, 282, true);
                 break;
         }
         u64 elapsed = stm_since(start);
@@ -1780,6 +1921,7 @@ void run_experiment_for_instance(std::string instance_name) {
     run_experiment(instance, "ils2a", instance_name.c_str(), false, time_limit, 3);
 }
 
+#if 0
 void globalConvexity(Instance instance, s32 n = 1000) {
     std::vector<Solution> solutions;
     solutions.reserve(n);
@@ -1922,6 +2064,7 @@ void globalConvexity(Instance instance, s32 n = 1000) {
     write_entire_file("results/edge_best.dat", common_edges_best);
     write_entire_file("results/vertex_best.dat", common_vertices_best);
 }
+#endif
 
 int main(int argc, char *argv[]) {
     srand(time(0));
@@ -1929,12 +2072,12 @@ int main(int argc, char *argv[]) {
 
     auto instance = parse_file("data/kroB200.tsp");
 
-    globalConvexity(instance);
+    //globalConvexity(instance);
 
     // write_entire_file("results/kroA/pos.dat", instance.positions);
 
     //run_experiment(instance, "HEA-LS", "kroA", false, 0, 4);
-    // run_experiment(instance, "HEA+LS", "kroA", false, 0, 5);
+    run_experiment(instance, "HEA+LS", "kroA", false, 0, 5);
     // instance = parse_file("data/kroB200.tsp");
     // write_entire_file("results/kroB/pos.dat", instance.positions);
     // run_experiment(instance, "HEA-LS", "kroB", false, 0, 4);
